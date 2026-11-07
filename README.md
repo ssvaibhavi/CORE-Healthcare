@@ -18,10 +18,10 @@ Our goal is to make healthcare communication simpler, more human, and more acces
 
 ##  Key Features
 
-### 🔊 Voice-Based Appointments
+###  Voice-Based Appointments
 An accessible experience designed to help patients listen to appointment information instead of relying entirely on written text.
 
-### 🌍 Multilingual Accessibility
+###  Multilingual Accessibility
 Designed around three languages:
 
 - Kannada (ಕನ್ನಡ)
