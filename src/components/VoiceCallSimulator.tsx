@@ -93,7 +93,7 @@ export const VoiceCallSimulator: React.FC<VoiceCallSimulatorProps> = ({
             {appointment.hospitalName}
           </h3>
           <p className="text-xs text-gray-300 mt-0.5">
-            1800-425-CORE · CT & Radiology Desk
+            Diagnostic & Radiology Coordinator Desk
           </p>
         </div>
 

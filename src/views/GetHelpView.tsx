@@ -41,14 +41,13 @@ export const GetHelpView: React.FC<GetHelpViewProps> = ({
     setSimulatedCalling(true);
     const speech =
       currentLanguage === 'kn'
-        ? 'ನಮಸ್ಕಾರ, CORE ಉಚಿತ ರೋಗಿ ಸಹಾಯವಾಣಿಗೆ ಸ್ವಾಗತ. ನಿಮ್ಮ ಪ್ರಶ್ನೆಗಳನ್ನು ಕನ್ನಡದಲ್ಲಿ ಕೇಳಿ.'
+        ? 'ನಮಸ್ಕಾರ, CORE ರೋಗಿ ಮಾರ್ಗದರ್ಶನ ಕೇಂದ್ರಕ್ಕೆ ಸ್ವಾಗತ. ನಿಮ್ಮ ಸ್ಕ್ಯಾನ್ ದಿನಾಂಕ, ಪರೀಕ್ಷಾ ನಿಯಮಗಳು ಅಥವಾ ತಲುಪುವ ಮಾರ್ಗದ ಬಗ್ಗೆ ನಿಮ್ಮ ಗ್ರಾಮದ ಆಶಾ ಕಾರ್ಯಕರ್ತೆ ಹಾಗೂ ಆಸ್ಪತ್ರೆ ಸಿಬ್ಬಂದಿಯ ನೆರವು ಲಭ್ಯವಿದೆ.'
         : currentLanguage === 'te'
-        ? 'నమస్కారం, CORE ఉచిత రోగి హెల్ప్‌లైన్‌కు స్వాగతం. మీ ప్రశ్నలను తెలుగులో అడగండి.'
-        : 'Welcome to the CORE patient assistance helpline. How may we assist you today?';
-    speechService.speak(speech, currentLanguage);
-    setTimeout(() => {
-      setSimulatedCalling(false);
-    }, 4500);
+        ? 'నమస్కారం, CORE రోగి మార్గదర్శక కేంద్రానికి స్వాగతం. మీ స్కాన్ తేదీ, నిబంధనలు లేదా హాస్పిటల్ మార్గం గురించి మీ గ్రామ ఆశా కార్యకర్త మరియు సిబ్బంది సహాయం అందుబాటులో ఉంది.'
+        : 'Welcome to the CORE Patient Guidance Center. You can receive guidance regarding scan dates, fasting rules, or hospital directions through village ASHA workers and staff.';
+    speechService.speak(speech, currentLanguage, {
+      onEnd: () => setSimulatedCalling(false),
+    });
   };
 
   return (
@@ -66,15 +65,15 @@ export const GetHelpView: React.FC<GetHelpViewProps> = ({
         </p>
       </div>
 
-      {/* Primary Helpline Banner (Big, Friendly, Immediate) */}
+      {/* Primary Patient Guidance Center Banner */}
       <div className="bg-gradient-to-r from-[#FCF9F5] via-white to-[#FCF9F5] border-2 border-[#BEA06D] rounded-3xl p-6 sm:p-8 shadow-md">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6 text-center sm:text-left">
           <div className="space-y-2">
             <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
               {t.help.tollFreeCardTitle}
             </span>
-            <p className="font-display text-3xl sm:text-4xl font-bold text-[#3C3330] flex items-center justify-center sm:justify-start gap-3">
-              <PhoneCall className="w-8 h-8 text-[#A2B29B] animate-bounce" />
+            <p className="font-display text-2xl sm:text-3xl font-bold text-[#3C3330] flex items-center justify-center sm:justify-start gap-3">
+              <HeartHandshake className="w-8 h-8 text-[#A2B29B]" />
               <span>{t.help.tollFreeNumber}</span>
             </p>
             <p className="text-xs text-[#3C3330]/75 flex items-center justify-center sm:justify-start gap-1.5">
@@ -85,10 +84,10 @@ export const GetHelpView: React.FC<GetHelpViewProps> = ({
 
           <button
             onClick={handleHelplineCall}
-            className="py-4 px-8 rounded-full bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-base shadow-lg shadow-emerald-700/25 transition-all cursor-pointer flex items-center gap-2"
+            className="py-4 px-8 rounded-full bg-[#BEA06D] hover:bg-[#8F7242] active:scale-95 text-white font-bold text-base shadow-lg shadow-[#BEA06D]/30 transition-all cursor-pointer flex items-center gap-2"
           >
-            <Phone className="w-5 h-5" />
-            <span>{simulatedCalling ? 'Connecting in Kannada...' : t.help.callNowBtn}</span>
+            <Volume2 className="w-5 h-5" />
+            <span>{simulatedCalling ? (currentLanguage === 'kn' ? 'ಆಲಿಸುತ್ತಿದ್ದೀರಿ...' : currentLanguage === 'te' ? 'వింటున్నారు...' : 'Playing Guidance...') : t.help.callNowBtn}</span>
           </button>
         </div>
       </div>

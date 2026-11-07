@@ -332,23 +332,28 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
           </div>
         </div>
 
-        <div className="p-5 bg-white border border-[#BEA06D]/30 rounded-2xl flex items-start gap-4">
-          <Phone className="w-8 h-8 text-[#A2B29B] shrink-0 mt-1" />
+        <div className="p-5 bg-white border border-[#BEA06D]/30 rounded-2xl flex items-start justify-between gap-4">
           <div className="space-y-1">
             <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-              {currentLanguage === 'kn' ? 'ನೇರ ಸಹಾಯ' : currentLanguage === 'te' ? 'నేరుగా మాట్లాడండి' : 'Immediate Help'}
+              {currentLanguage === 'kn' ? 'ಸಹಾಯ ಮತ್ತು ಮಾರ್ಗದರ್ಶನ' : currentLanguage === 'te' ? 'సహాయం & మార్గదర్శకత్వం' : 'Patient Support'}
             </span>
             <p className="text-sm font-semibold text-[#3C3330]">
-              1800-425-CORE (Toll-Free)
+              {currentLanguage === 'kn' ? 'ಗ್ರಾಮ ಆಶಾ ಕಾರ್ಯಕರ್ತೆ ಹಾಗೂ ಆಸ್ಪತ್ರೆ ನೆರವು' : currentLanguage === 'te' ? 'గ్రామ ఆశా కార్యకర్త & హాస్పిటల్ సహాయం' : 'Hospital & ASHA Worker Guidance'}
             </p>
             <p className="text-xs text-[#3C3330]/75">
               {currentLanguage === 'kn'
-                ? 'ಆಸ್ಪತ್ರೆ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ.'
+                ? 'ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಅರ್ಥಮಾಡಿಕೊಳ್ಳಲು ಯಾವುದೇ ಸಂದೇಹವಿದ್ದರೂ ನೆರವು ಪಡೆಯಿರಿ.'
                 : currentLanguage === 'te'
-                ? 'హాస్పిటల్ సిబ్బందితో తెలుగులో మాట్లాడండి.'
-                : 'Speak with hospital help desk in your preferred language.'}
+                ? 'అపాయింట్‌మెంట్ వివరాలు అర్థం చేసుకోవడానికి సహాయం తీసుకోండి.'
+                : 'Need guidance understanding your appointment or directions?'}
             </p>
           </div>
+          <button
+            onClick={() => onPageChange('help')}
+            className="py-2.5 px-4 bg-[#BEA06D] hover:bg-[#8F7242] text-white text-xs font-semibold rounded-xl transition-all shrink-0 cursor-pointer shadow-xs"
+          >
+            {t.nav.getHelp} →
+          </button>
         </div>
       </div>
     </div>

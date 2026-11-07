@@ -111,29 +111,31 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
 
           {/* Col 3: Assistance & Helplines */}
+          {/* Col 3: Assistance & Guidance */}
           <div>
             <h4 className="font-display text-lg font-semibold text-[#3C3330] mb-4">
               {t.footer.contactSupport}
             </h4>
             <div className="space-y-3 text-sm">
-              <div className="p-3 bg-[#FCF9F5] border border-[#BEA06D]/30 rounded-xl">
+              <div className="p-3.5 bg-[#FCF9F5] border border-[#BEA06D]/30 rounded-xl">
                 <span className="text-xs text-[#8F7242] block font-semibold">
-                  {currentLanguage === 'kn' ? 'ಉಚಿತ ಸಹಾಯವಾಣಿ' : currentLanguage === 'te' ? 'ఉచిత హెల్ప్‌లైన్' : 'Toll-Free Patient Desk'}
+                  {currentLanguage === 'kn' ? 'ರೋಗಿ ಮಾರ್ಗದರ್ಶನ' : currentLanguage === 'te' ? 'రోగి మార్గదర్శకత్వం' : 'Patient Support & Guidance'}
                 </span>
-                <span className="text-base font-bold text-[#3C3330] flex items-center gap-1.5 mt-0.5">
-                  <Phone className="w-4 h-4 text-[#A2B29B]" />
-                  1800-425-CORE
-                </span>
-                <span className="text-[11px] text-[#3C3330]/70 block mt-1">
-                  {currentLanguage === 'kn' ? 'ಬೆಳಿಗ್ಗೆ ೭:೦೦ ರಿಂದ ರಾತ್ರಿ ೯:೦೦ ವರೆಗೆ' : currentLanguage === 'te' ? 'ఉదయం 7 నుండి రాత్రి 9 వరకు' : 'Every day 7:00 AM – 9:00 PM IST'}
-                </span>
+                <p className="text-xs text-[#3C3330]/80 mt-1.5 leading-relaxed">
+                  {currentLanguage === 'kn'
+                    ? 'ಗ್ರಾಮ ಆಶಾ ಕಾರ್ಯಕರ್ತೆಯರು ಮತ್ತು ಆಸ್ಪತ್ರೆ ಸಿಬ್ಬಂದಿಯ ನೆರವು ಪಡೆಯಿರಿ.'
+                    : currentLanguage === 'te'
+                    ? 'గ్రామ ఆశా కార్యకర్తలు మరియు హాస్పిటల్ సిబ్బంది సహాయం పొందండి.'
+                    : 'Access village ASHA workers, hospital help desk guidance, and spoken instructions.'}
+                </p>
               </div>
 
               <button
                 onClick={() => onPageChange('help')}
-                className="text-xs font-semibold text-[#8F7242] hover:text-[#3C3330] underline block"
+                className="py-2.5 px-4 bg-[#BEA06D] hover:bg-[#8F7242] text-white text-xs font-semibold rounded-xl transition-colors inline-flex items-center gap-2 cursor-pointer shadow-xs"
               >
-                {t.nav.getHelp} →
+                <span>{t.nav.getHelp}</span>
+                <span>→</span>
               </button>
             </div>
           </div>

@@ -11,7 +11,7 @@ import { AboutView } from './views/AboutView';
 import { StaffDashboardView } from './views/StaffDashboardView';
 import { INITIAL_APPOINTMENTS } from './data/mockAppointments';
 import { Appointment, Language, PageView, TextSize } from './types';
-import { PhoneCall, Volume2 } from 'lucide-react';
+import { HelpCircle, Volume2 } from 'lucide-react';
 import { speechService } from './utils/speech';
 
 export default function App() {
@@ -212,16 +212,17 @@ export default function App() {
         )}
       </main>
 
-      {/* Quick Floating Emergency / Voice Assistance Trigger */}
+      {/* Quick Floating Get Help Navigation Button */}
       <div className="fixed bottom-5 right-5 z-30 flex items-center gap-2">
         <button
           onClick={() => handlePageChange('help')}
-          className="flex items-center gap-2 bg-[#BEA06D] hover:bg-[#8F7242] active:scale-95 text-white font-bold py-3 px-5 rounded-full shadow-xl shadow-[#BEA06D]/40 border-2 border-white/80 transition-all cursor-pointer"
-          title="Toll-Free Patient Helpline"
+          className="flex items-center gap-2.5 bg-[#BEA06D] hover:bg-[#8F7242] active:scale-95 text-white font-bold py-3 px-5 rounded-full shadow-xl shadow-[#BEA06D]/40 border-2 border-white/80 transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#BEA06D]/40"
+          title={currentLanguage === 'kn' ? 'ಸಹಾಯ ಪಡೆಯಿರಿ' : currentLanguage === 'te' ? 'సహాయం పొందండి' : 'Get Help'}
+          aria-label={currentLanguage === 'kn' ? 'ಸಹಾಯ ಪಡೆಯಿರಿ' : currentLanguage === 'te' ? 'సహాయం పొందండి' : 'Get Help'}
         >
-          <PhoneCall className="w-5 h-5 animate-pulse" />
-          <span className="text-xs sm:text-sm">
-            {currentLanguage === 'kn' ? 'ಸಹಾಯವಾಣಿ (1800)' : currentLanguage === 'te' ? 'హెల్ప్‌లైన్' : '1800-425-CORE'}
+          <HelpCircle className="w-5 h-5 text-white" />
+          <span className="text-xs sm:text-sm font-semibold">
+            {currentLanguage === 'kn' ? 'ಸಹಾಯ ಪಡೆಯಿರಿ' : currentLanguage === 'te' ? 'సహాయం పొందండి' : 'Get Help'}
           </span>
         </button>
       </div>
