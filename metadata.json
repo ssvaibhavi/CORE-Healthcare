@@ -1,0 +1,6 @@
+{
+  "name": "CORE — Healthcare Accessibility Platform",
+  "description": "Multilingual, voice-first healthcare communication platform for elderly, rural, and low-literacy patients in Kannada, Telugu, and English.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

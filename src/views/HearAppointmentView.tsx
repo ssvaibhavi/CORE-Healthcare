@@ -1,0 +1,356 @@
+import React, { useState } from 'react';
+import { ASSETS } from '../assets/images';
+import { Appointment, Language, PageView } from '../types';
+import { TRANSLATIONS } from '../data/translations';
+import { AudioPlayer } from '../components/AudioPlayer';
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  Building2,
+  AlertTriangle,
+  CheckCircle2,
+  Phone,
+  Search,
+  Sparkles,
+  ArrowRight,
+  User,
+  HeartHandshake,
+  Shield,
+  FileText
+} from 'lucide-react';
+
+interface HearAppointmentViewProps {
+  currentLanguage: Language;
+  appointment: Appointment;
+  onConfirmAttendance: (id: string) => void;
+  onPageChange: (page: PageView) => void;
+  onSearchAppointment: (query: string) => void;
+  allAppointments: Appointment[];
+  onSelectAppointment: (apt: Appointment) => void;
+}
+
+export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
+  currentLanguage,
+  appointment,
+  onConfirmAttendance,
+  onPageChange,
+  onSearchAppointment,
+  allAppointments,
+  onSelectAppointment,
+}) => {
+  const t = TRANSLATIONS[currentLanguage];
+  const [searchInput, setSearchInput] = useState('');
+  const [confirmedSuccess, setConfirmedSuccess] = useState(false);
+
+  // Build the complete natural spoken speech text in the selected language
+  const getFullSpokenText = (): string => {
+    if (currentLanguage === 'kn') {
+      return `ನಮಸ್ಕಾರ ${appointment.patientNameKannada} ರವರೇ. ನಿಮ್ಮ ${appointment.hospitalNameKannada} ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ವಿವರಗಳು ಹೀಗಿವೆ. ಪರೀಕ್ಷೆ: ${appointment.testNameKannada}. ದಿನಾಂಕ: ${appointment.date}, ${appointment.dayOfWeek}. ಸಮಯ: ಬೆಳಗ್ಗೆ ${appointment.time}. ಆಸ್ಪತ್ರೆಯ ವಿಭಾಗ: ${appointment.roomNumber}. ಪರೀಕ್ಷೆಗೆ ಮುನ್ನ ಪಾಲಿಸಬೇಕಾದ ನಿಯಮಗಳು: ${appointment.preparationInstructions.kn.join(' ')} ${appointment.directions.kn} ಧನ್ಯವಾದಗಳು.`;
+    } else if (currentLanguage === 'te') {
+      return `నమస్కారం ${appointment.patientNameTelugu} గారూ. మీ ${appointment.hospitalNameTelugu} అపాయింట్‌మెంట్ వివరాలు: పరీక్ష: ${appointment.testNameTelugu}. తేదీ: ${appointment.date}, ${appointment.dayOfWeek}. సమయం: ఉదయం ${appointment.time}. విభాగం: ${appointment.roomNumber}. ముఖ్యమైన జాగ్రత్తలు: ${appointment.preparationInstructions.te.join(' ')} ${appointment.directions.te} ధన్యవాదాలు.`;
+    } else {
+      return `Hello ${appointment.patientName}. Here are your appointment details for ${appointment.hospitalName}. Test: ${appointment.testName}. Scheduled Date: ${appointment.date}, ${appointment.dayOfWeek} at ${appointment.time}. Department: ${appointment.roomNumber}. Preparation instructions: ${appointment.preparationInstructions.en.join(' ')} Directions: ${appointment.directions.en} Thank you.`;
+    }
+  };
+
+  const handleConfirm = () => {
+    onConfirmAttendance(appointment.id);
+    setConfirmedSuccess(true);
+  };
+
+  const patientDisplayName =
+    currentLanguage === 'kn'
+      ? appointment.patientNameKannada
+      : currentLanguage === 'te'
+      ? appointment.patientNameTelugu
+      : appointment.patientName;
+
+  const testDisplayName =
+    currentLanguage === 'kn'
+      ? appointment.testNameKannada
+      : currentLanguage === 'te'
+      ? appointment.testNameTelugu
+      : appointment.testName;
+
+  const hospitalDisplayName =
+    currentLanguage === 'kn'
+      ? appointment.hospitalNameKannada
+      : currentLanguage === 'te'
+      ? appointment.hospitalNameTelugu
+      : appointment.hospitalName;
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10">
+      {/* Header & Verification Bar */}
+      <div className="text-center max-w-3xl mx-auto space-y-3">
+        <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+          {currentLanguage === 'kn' ? 'ಧ್ವನಿ ಆಧಾರಿತ ವಿವರಗಳು' : currentLanguage === 'te' ? 'వాయిస్ ఆధారిత వివరాలు' : 'Voice-First Information'}
+        </span>
+        <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
+          {t.appointment.title}
+        </h1>
+        <p className="text-sm sm:text-base text-[#3C3330]/80">
+          {t.appointment.subtitle}
+        </p>
+      </div>
+
+      {/* Simplified Patient Switcher / Verification Box */}
+      <div className="bg-white border border-[#BEA06D]/30 rounded-3xl p-5 sm:p-7 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="w-full sm:w-auto">
+            <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider block">
+              {t.appointment.lookupTitle}
+            </span>
+            <p className="text-sm text-[#3C3330]/80 mt-0.5">
+              {t.appointment.lookupDesc}
+            </p>
+          </div>
+
+          {/* Quick Demo Pre-fills for ease of testing */}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {allAppointments.map((apt) => (
+              <button
+                key={apt.id}
+                onClick={() => {
+                  onSelectAppointment(apt);
+                  setConfirmedSuccess(false);
+                }}
+                className={`text-xs px-3.5 py-2 rounded-full border transition-all cursor-pointer font-medium ${
+                  appointment.id === apt.id
+                    ? 'bg-[#BEA06D] text-white border-[#BEA06D] shadow-sm'
+                    : 'bg-[#FCF9F5] text-[#3C3330] border-[#BEA06D]/30 hover:border-[#BEA06D]'
+                }`}
+              >
+                {apt.patientName} ({apt.preferredLanguage.toUpperCase()})
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Appointment Card */}
+      <div className="bg-white border-2 border-[#BEA06D]/40 rounded-3xl shadow-lg overflow-hidden transition-all">
+        {/* Card Header Strip with Gold Accents */}
+        <div className="bg-[#FCF9F5] border-b border-[#BEA06D]/30 p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-[#BEA06D] shadow-sm bg-white shrink-0">
+              <img
+                src={ASSETS.logoEmblem}
+                alt="CORE"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+                {t.appointment.detailsTitle}
+              </span>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#3C3330]">
+                {patientDisplayName}
+              </h2>
+              <span className="text-xs text-[#3C3330]/70">
+                {currentLanguage === 'kn' ? `ವಯಸ್ಸು: ${appointment.patientAge} ವರ್ಷ` : currentLanguage === 'te' ? `వయస్సు: ${appointment.patientAge} ఏళ్ళు` : `Age: ${appointment.patientAge} Years`} · {appointment.patientVillage}, {appointment.patientDistrict}
+              </span>
+            </div>
+          </div>
+
+          {/* Status Badge */}
+          <div className="shrink-0">
+            {appointment.status === 'confirmed' ? (
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#A2B29B]/25 border border-[#A2B29B] text-[#4A6347] font-bold text-xs">
+                <CheckCircle2 className="w-4 h-4 text-[#4A6347]" />
+                <span>{t.appointment.confirmed}</span>
+              </div>
+            ) : appointment.status === 'rescheduled' ? (
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-bold text-xs">
+                <Calendar className="w-4 h-4 text-amber-600" />
+                <span>{t.appointment.rescheduled}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-orange-50 border border-orange-300 text-orange-800 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-orange-600" />
+                <span>{t.appointment.unconfirmed}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* VOICE-FIRST AUDIO PLAYER (The Heart of the Experience) */}
+        <div className="p-6 sm:p-8 bg-gradient-to-r from-[#FCF9F5] via-white to-[#FCF9F5] border-b border-[#BEA06D]/30">
+          <AudioPlayer
+            textToSpeak={getFullSpokenText()}
+            language={currentLanguage}
+          />
+        </div>
+
+        {/* Appointment Grid Details with Big Accessible Typography */}
+        <div className="p-6 sm:p-8 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* Box 1: Diagnostic Test */}
+            <div className="p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/30 space-y-1.5">
+              <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-[#BEA06D]" />
+                {t.appointment.testLabel}
+              </span>
+              <p className="font-display text-xl sm:text-2xl font-bold text-[#3C3330]">
+                {testDisplayName}
+              </p>
+              <span className="text-xs text-[#3C3330]/70 block">
+                {appointment.testCategory} · Dr. Suresh Patil
+              </span>
+            </div>
+
+            {/* Box 2: Date & Reporting Time */}
+            <div className="p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/30 space-y-1.5">
+              <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-[#BEA06D]" />
+                {t.appointment.dateLabel} & {t.appointment.timeLabel}
+              </span>
+              <p className="font-display text-xl sm:text-2xl font-bold text-[#3C3330]">
+                {appointment.date} ({appointment.dayOfWeek})
+              </p>
+              <p className="text-lg font-bold text-[#8F7242]">
+                {appointment.time}{' '}
+                <span className="text-xs font-normal text-[#3C3330]/70">
+                  ({currentLanguage === 'kn' ? 'ಬೆಳಗ್ಗೆ' : currentLanguage === 'te' ? 'ఉదయం' : 'Morning'})
+                </span>
+              </p>
+            </div>
+
+            {/* Box 3: Hospital & Department */}
+            <div className="p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/30 space-y-1.5">
+              <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider flex items-center gap-1.5">
+                <Building2 className="w-4 h-4 text-[#BEA06D]" />
+                {t.appointment.hospitalLabel}
+              </span>
+              <p className="text-lg font-bold text-[#3C3330]">
+                {hospitalDisplayName}
+              </p>
+              <p className="text-xs text-[#3C3330]/80">
+                {appointment.department}
+              </p>
+            </div>
+
+            {/* Box 4: Room & Directions */}
+            <div className="p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/30 space-y-1.5">
+              <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-red-500" />
+                {t.appointment.roomLabel}
+              </span>
+              <p className="text-base font-bold text-[#3C3330]">
+                {appointment.roomNumber}
+              </p>
+              <p className="text-xs text-[#3C3330]/80 leading-relaxed">
+                {appointment.directions[currentLanguage]}
+              </p>
+            </div>
+          </div>
+
+          {/* Hospital-Approved Preparation Instructions (Clear Visual Cards) */}
+          <div className="p-6 rounded-2xl bg-[#E6C1C4]/20 border border-[#E6C1C4] space-y-4">
+            <div className="flex items-center gap-2 text-[#8F7242] font-bold text-sm uppercase tracking-wider">
+              <AlertTriangle className="w-5 h-5 text-[#C98897]" />
+              <span>{t.appointment.preparationTitle}</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {appointment.preparationInstructions[currentLanguage].map((step, idx) => (
+                <div
+                  key={idx}
+                  className="p-3.5 bg-white/90 rounded-xl border border-[#E6C1C4]/60 flex items-start gap-3 shadow-xs"
+                >
+                  <span className="w-6 h-6 rounded-full bg-[#BEA06D] text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {idx + 1}
+                  </span>
+                  <p className="text-sm font-medium text-[#3C3330] leading-snug">
+                    {step}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Confirmation & Reschedule Action Buttons (Big, High-Touch Targets) */}
+          <div className="pt-4 border-t border-[#BEA06D]/20 space-y-4">
+            {confirmedSuccess || appointment.status === 'confirmed' ? (
+              <div className="p-5 rounded-2xl bg-[#A2B29B]/20 border border-[#A2B29B] text-center space-y-2 animate-in fade-in-50">
+                <CheckCircle2 className="w-10 h-10 text-[#4A6347] mx-auto" />
+                <h4 className="text-lg font-bold text-[#211B19]">
+                  {t.appointment.confirmedNotice}
+                </h4>
+                <p className="text-xs text-[#3C3330]/80">
+                  {currentLanguage === 'kn'
+                    ? 'ನಿಮ್ಮ ಹಾಜರಾತಿಯನ್ನು ಸಿಟಿ ಸ್ಕ್ಯಾನ್ ವಿಭಾಗಕ್ಕೆ ದಾಖಲಿಸಲಾಗಿದೆ. ಸ್ಕ್ಯಾನ್ ದಿನದಂದು ನಿಯಮ ಪಾಲಿಸಿ.'
+                    : currentLanguage === 'te'
+                    ? 'మీ రాక హాస్పిటల్ సిబ్బందికి నమోదు చేయబడింది. దయచేసి చెప్పిన జాగ్రత్తలు పాటించండి.'
+                    : 'Attendance registered. Reminder will be dispatched on the morning of your scan.'}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <button
+                onClick={handleConfirm}
+                className="py-5 px-6 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-[0.98] text-white font-bold text-lg sm:text-xl shadow-md transition-all flex items-center justify-center gap-3 cursor-pointer focus:outline-none focus:ring-4 focus:ring-emerald-400"
+              >
+                <CheckCircle2 className="w-7 h-7" />
+                <span>{t.appointment.iWillAttendBtn}</span>
+              </button>
+
+              <button
+                onClick={() => onPageChange('reschedule')}
+                className="py-5 px-6 rounded-2xl bg-white hover:bg-amber-50 active:scale-[0.98] border-2 border-amber-600 text-amber-900 font-bold text-lg sm:text-xl shadow-sm transition-all flex items-center justify-center gap-3 cursor-pointer focus:outline-none focus:ring-4 focus:ring-amber-300"
+              >
+                <Calendar className="w-7 h-7 text-amber-600" />
+                <span>{t.appointment.iNeedToChangeBtn}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Helpful Caregiver and Assistance Info */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="p-5 bg-white border border-[#BEA06D]/30 rounded-2xl flex items-start gap-4">
+          <HeartHandshake className="w-8 h-8 text-[#BEA06D] shrink-0 mt-1" />
+          <div className="space-y-1">
+            <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+              {currentLanguage === 'kn' ? 'ಆರೈಕೆದಾರರ ರಕ್ಷಣೆ' : currentLanguage === 'te' ? 'సంరక్షకుడి సహాయం' : 'Caregiver Safety Net'}
+            </span>
+            <p className="text-sm font-semibold text-[#3C3330]">
+              {appointment.caregiver?.name} ({appointment.caregiver?.relation})
+            </p>
+            <p className="text-xs text-[#3C3330]/75">
+              {currentLanguage === 'kn'
+                ? 'ನೀವು ದೃಢೀಕರಿಸದಿದ್ದಾಗ ಮಾತ್ರ ನಿಮ್ಮ ಮಗನಿಗೆ ಸಂದೇಶ ಕಳುಹಿಸಲಾಗುತ್ತದೆ.'
+                : currentLanguage === 'te'
+                ? 'మీరు స్పందించకపోతే మాత్రమే మీ కుమారుడికి సమాచారం పంపబడుతుంది.'
+                : 'Notified only if unconfirmed within 12 hours.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="p-5 bg-white border border-[#BEA06D]/30 rounded-2xl flex items-start gap-4">
+          <Phone className="w-8 h-8 text-[#A2B29B] shrink-0 mt-1" />
+          <div className="space-y-1">
+            <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+              {currentLanguage === 'kn' ? 'ನೇರ ಸಹಾಯ' : currentLanguage === 'te' ? 'నేరుగా మాట్లాడండి' : 'Immediate Help'}
+            </span>
+            <p className="text-sm font-semibold text-[#3C3330]">
+              1800-425-CORE (Toll-Free)
+            </p>
+            <p className="text-xs text-[#3C3330]/75">
+              {currentLanguage === 'kn'
+                ? 'ಆಸ್ಪತ್ರೆ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ.'
+                : currentLanguage === 'te'
+                ? 'హాస్పిటల్ సిబ్బందితో తెలుగులో మాట్లాడండి.'
+                : 'Speak with hospital help desk in your preferred language.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
