@@ -70,3 +70,96 @@
 .wave-bar:nth-child(3) { animation-delay: 0.4s; }
 .wave-bar:nth-child(4) { animation-delay: 0.1s; }
 .wave-bar:nth-child(5) { animation-delay: 0.3s; }
+
+/* Subtle botanical & editorial microinteractions */
+@keyframes softFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.soft-fade-up {
+  animation: softFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes gentleCheckPop {
+  0% { transform: scale(0.85); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.check-pop {
+  animation: gentleCheckPop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.botanical-card-hover {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.botanical-card-hover:hover {
+  transform: translateY(-2px);
+}
+
+/* Larger Interactive Buttons Mode */
+.large-targets button,
+.large-targets a,
+.large-targets [role="button"],
+.large-targets label:has(input[type="checkbox"]),
+.large-targets label:has(input[type="radio"]) {
+  min-height: 52px;
+}
+
+.large-targets button:not(.compact-chip) {
+  padding-top: 0.875rem;
+  padding-bottom: 0.875rem;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+/* Reduced Motion Accessibility Mode (User toggle OR OS preference) */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Clean Print / Save as PDF styling for My Visit Passport */
+@media print {
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #FFFFFF !important;
+    color: #211B19 !important;
+  }
+
+  .print-passport-only {
+    box-shadow: none !important;
+    border: 2px solid #BEA06D !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    page-break-inside: avoid;
+  }
+}

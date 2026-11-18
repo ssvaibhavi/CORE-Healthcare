@@ -3,6 +3,7 @@ import { ASSETS } from '../assets/images';
 import { Appointment, Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { AudioPlayer } from '../components/AudioPlayer';
+import { CareJourneyTimeline } from '../components/CareJourneyTimeline';
 import {
   Calendar,
   Clock,
@@ -10,14 +11,11 @@ import {
   Building2,
   AlertTriangle,
   CheckCircle2,
-  Phone,
-  Search,
-  Sparkles,
-  ArrowRight,
-  User,
+  FileText,
   HeartHandshake,
-  Shield,
-  FileText
+  BookOpen,
+  FileCheck2,
+  Users
 } from 'lucide-react';
 
 interface HearAppointmentViewProps {
@@ -28,6 +26,8 @@ interface HearAppointmentViewProps {
   onSearchAppointment: (query: string) => void;
   allAppointments: Appointment[];
   onSelectAppointment: (apt: Appointment) => void;
+  completedTasks: Record<string, boolean>;
+  onToggleTask: (taskId: string) => void;
 }
 
 export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
@@ -35,9 +35,10 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
   appointment,
   onConfirmAttendance,
   onPageChange,
-  onSearchAppointment,
   allAppointments,
   onSelectAppointment,
+  completedTasks,
+  onToggleTask,
 }) => {
   const t = TRANSLATIONS[currentLanguage];
   const [searchInput, setSearchInput] = useState('');
@@ -356,6 +357,65 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Quick Patient Toolkit Shortcuts */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <button
+          type="button"
+          onClick={() => onPageChange('clarity')}
+          className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
+        >
+          <BookOpen className="w-6 h-6 text-[#4A6347] shrink-0" />
+          <div>
+            <span className="text-sm font-bold text-[#3C3330] block">
+              {currentLanguage === 'kn' ? 'ಸರಳವಾಗಿ ವಿವರಿಸಿ' : currentLanguage === 'te' ? 'సులభంగా వివరించండి' : 'Explain It Simply'}
+            </span>
+            <span className="text-xs text-[#3C3330]/75">
+              {currentLanguage === 'kn' ? 'ಸೂಚನೆಗಳ ಸುಲಭ ಅರ್ಥ ಕೇಳಿ' : currentLanguage === 'te' ? 'సూచనలను సులభంగా వినండి' : 'Hear hospital terms clearly'}
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onPageChange('passport')}
+          className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
+        >
+          <FileCheck2 className="w-6 h-6 text-[#BEA06D] shrink-0" />
+          <div>
+            <span className="text-sm font-bold text-[#3C3330] block">
+              {currentLanguage === 'kn' ? 'ನನ್ನ ವಿಸಿಟ್ ಪಾಸ್‌ಪೋರ್ಟ್' : currentLanguage === 'te' ? 'నా విజిట్ పాస్‌పోర్ట్' : 'My Visit Passport'}
+            </span>
+            <span className="text-xs text-[#3C3330]/75">
+              {currentLanguage === 'kn' ? 'ಪ್ರಿಂಟ್ / PDF ಸಿದ್ಧತಾ ಕಾರ್ಡ್' : currentLanguage === 'te' ? 'ప్రింట్ / PDF కార్డు పొందండి' : 'Print or save preparation card'}
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onPageChange('carecircle')}
+          className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
+        >
+          <Users className="w-6 h-6 text-[#C98897] shrink-0" />
+          <div>
+            <span className="text-sm font-bold text-[#3C3330] block">
+              CareCircle
+            </span>
+            <span className="text-xs text-[#3C3330]/75">
+              {currentLanguage === 'kn' ? 'ಸಮ್ಮತಿ ಆಧಾರಿತ ಕುಟುಂಬ ನೆರವು' : currentLanguage === 'te' ? 'అనుమతితో కుటుంబ సహాయం' : 'Consent-based family sharing'}
+            </span>
+          </div>
+        </button>
+      </div>
+
+      {/* Interactive 3-Stage Care Journey Timeline */}
+      <CareJourneyTimeline
+        language={currentLanguage}
+        appointment={appointment}
+        completedTasks={completedTasks}
+        onToggleTask={onToggleTask}
+      />
     </div>
   );
 };

@@ -10,7 +10,30 @@ export type PageView =
   | 'how-it-works'
   | 'help'
   | 'about'
-  | 'staff';
+  | 'staff'
+  | 'journey'
+  | 'clarity'
+  | 'carecircle'
+  | 'passport';
+
+export interface ComfortSettings {
+  textSize: TextSize;
+  highContrast: boolean;
+  reduceMotion: boolean;
+  simplifiedNav: boolean;
+  largeButtons: boolean;
+  readAloud: boolean;
+  guidedMode: boolean;
+}
+
+export interface CareCircleSharingSettings {
+  consentGranted: boolean;
+  consentTimestamp?: string;
+  shareAppointmentOverview: boolean;
+  shareChecklist: boolean;
+  shareReminders: boolean;
+  shareDirections: boolean;
+}
 
 export interface CaregiverInfo {
   name: string;

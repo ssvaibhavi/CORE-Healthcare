@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
+import { ComfortModePanel } from './components/ComfortModePanel';
+import { GuidedModeBar } from './components/GuidedModeBar';
+import { CoreCompanion } from './components/CoreCompanion';
 import { HomeView } from './views/HomeView';
 import { HearAppointmentView } from './views/HearAppointmentView';
 import { RescheduleView } from './views/RescheduleView';
@@ -9,44 +12,99 @@ import { HowItWorksView } from './views/HowItWorksView';
 import { GetHelpView } from './views/GetHelpView';
 import { AboutView } from './views/AboutView';
 import { StaffDashboardView } from './views/StaffDashboardView';
+import { CareJourneyView } from './views/CareJourneyView';
+import { ClarityView } from './views/ClarityView';
+import { CareCircleView } from './views/CareCircleView';
+import { VisitPassportView } from './views/VisitPassportView';
 import { INITIAL_APPOINTMENTS } from './data/mockAppointments';
-import { Appointment, Language, PageView, TextSize } from './types';
-import { HelpCircle, Volume2 } from 'lucide-react';
+import {
+  Appointment,
+  CareCircleSharingSettings,
+  ComfortSettings,
+  Language,
+  PageView
+} from './types';
 import { speechService } from './utils/speech';
+
+const DEFAULT_COMFORT_SETTINGS: ComfortSettings = {
+  textSize: 'normal',
+  highContrast: false,
+  reduceMotion: false,
+  simplifiedNav: false,
+  largeButtons: false,
+  readAloud: true,
+  guidedMode: false,
+};
+
+const DEFAULT_CARECIRCLE_SHARING: CareCircleSharingSettings = {
+  consentGranted: false,
+  consentTimestamp: undefined,
+  shareAppointmentOverview: true,
+  shareChecklist: true,
+  shareReminders: true,
+  shareDirections: true,
+};
 
 export default function App() {
   const [currentLanguage, setCurrentLanguage] = useState<Language>('kn');
   const [currentPage, setCurrentPage] = useState<PageView>('home');
-  const [textSize, setTextSize] = useState<TextSize>('normal');
-  const [highContrast, setHighContrast] = useState<boolean>(false);
+  const [comfortSettings, setComfortSettings] = useState<ComfortSettings>(DEFAULT_COMFORT_SETTINGS);
+  const [comfortOpen, setComfortOpen] = useState<boolean>(false);
+  const [companionOpen, setCompanionOpen] = useState<boolean>(false);
   const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment>(INITIAL_APPOINTMENTS[0]);
+  const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
+  const [careCircleSharing, setCareCircleSharing] = useState<CareCircleSharingSettings>(
+    DEFAULT_CARECIRCLE_SHARING
+  );
+  const [demoResetSignal, setDemoResetSignal] = useState<number>(0);
 
-  // Sync high contrast class to root element
+  // Sync accessibility classes to documentElement
   useEffect(() => {
-    if (highContrast) {
-      document.documentElement.classList.add('high-contrast');
-    } else {
-      document.documentElement.classList.remove('high-contrast');
-    }
-  }, [highContrast]);
+    const root = document.documentElement;
+    root.classList.toggle('high-contrast', comfortSettings.highContrast);
+    root.classList.toggle('reduce-motion', comfortSettings.reduceMotion);
+    root.classList.toggle('large-targets', comfortSettings.largeButtons);
+  }, [comfortSettings.highContrast, comfortSettings.reduceMotion, comfortSettings.largeButtons]);
 
   // Scroll to top on page switch
   const handlePageChange = (page: PageView) => {
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({
+      top: 0,
+      behavior: comfortSettings.reduceMotion ? 'auto' : 'smooth',
+    });
   };
 
   const handleLanguageChange = (lang: Language) => {
     setCurrentLanguage(lang);
-    // Announce language change
-    const msg =
-      lang === 'kn'
-        ? 'ಕನ್ನಡ ಭಾಷೆ ಆಯ್ಕೆಯಾಗಿದೆ.'
-        : lang === 'te'
-        ? 'తెలుగు భాష ఎంచుకోబడింది.'
-        : 'Language set to English.';
-    speechService.speak(msg, lang);
+    if (comfortSettings.readAloud) {
+      const msg =
+        lang === 'kn'
+          ? 'ಕನ್ನಡ ಭಾಷೆ ಆಯ್ಕೆಯಾಗಿದೆ.'
+          : lang === 'te'
+          ? 'తెలుగు భాష ఎంచుకోబడింది.'
+          : 'Language set to English.';
+      speechService.speak(msg, lang);
+    }
+  };
+
+  const handleToggleTask = (taskId: string) => {
+    setCompletedTasks((prev) => ({
+      ...prev,
+      [taskId]: !prev[taskId],
+    }));
+  };
+
+  const handleResetDemo = () => {
+    speechService.stop();
+    setAppointments(INITIAL_APPOINTMENTS);
+    setSelectedAppointment(INITIAL_APPOINTMENTS[0]);
+    setCompletedTasks({});
+    setCareCircleSharing(DEFAULT_CARECIRCLE_SHARING);
+    setComfortSettings(DEFAULT_COMFORT_SETTINGS);
+    setComfortOpen(false);
+    setDemoResetSignal((c) => c + 1);
   };
 
   const handleConfirmAttendance = (id: string) => {
@@ -113,8 +171,12 @@ export default function App() {
 
   // Text size container scale
   const getTextSizeClass = () => {
-    if (textSize === 'large') return 'text-lg [&_h1]:text-5xl [&_h2]:text-4xl [&_p]:text-lg [&_button]:text-lg';
-    if (textSize === 'xlarge') return 'text-xl [&_h1]:text-6xl [&_h2]:text-5xl [&_p]:text-xl [&_button]:text-xl';
+    if (comfortSettings.textSize === 'large') {
+      return 'text-lg [&_h1]:text-5xl [&_h2]:text-4xl [&_p]:text-lg [&_button]:text-lg';
+    }
+    if (comfortSettings.textSize === 'xlarge') {
+      return 'text-xl [&_h1]:text-6xl [&_h2]:text-5xl [&_p]:text-xl [&_button]:text-xl';
+    }
     return '';
   };
 
@@ -124,17 +186,42 @@ export default function App() {
         currentLanguage === 'kn' ? 'font-kannada' : currentLanguage === 'te' ? 'font-telugu' : 'font-body'
       } ${getTextSizeClass()}`}
     >
-      {/* Top Header with Navigation, Language Selector, and Accessibility */}
+      {/* Top Header with Navigation, Language Selector, and Comfort Mode */}
       <Header
         currentLanguage={currentLanguage}
         onLanguageChange={handleLanguageChange}
         currentPage={currentPage}
         onPageChange={handlePageChange}
-        textSize={textSize}
-        onTextSizeChange={setTextSize}
-        highContrast={highContrast}
-        onHighContrastToggle={() => setHighContrast(!highContrast)}
+        comfortSettings={comfortSettings}
+        onTextSizeChange={(sz) => setComfortSettings((prev) => ({ ...prev, textSize: sz }))}
+        onHighContrastToggle={() =>
+          setComfortSettings((prev) => ({ ...prev, highContrast: !prev.highContrast }))
+        }
+        comfortOpen={comfortOpen}
+        onToggleComfortOpen={() => setComfortOpen((prev) => !prev)}
       />
+
+      {/* Functional CORE Comfort Mode Drawer */}
+      <ComfortModePanel
+        isOpen={comfortOpen}
+        onClose={() => setComfortOpen(false)}
+        language={currentLanguage}
+        settings={comfortSettings}
+        onUpdateSettings={setComfortSettings}
+        onResetComfort={() => setComfortSettings(DEFAULT_COMFORT_SETTINGS)}
+      />
+
+      {/* Elderly Step-by-Step Guided Mode Bar */}
+      {comfortSettings.guidedMode && (
+        <GuidedModeBar
+          language={currentLanguage}
+          currentPage={currentPage}
+          onPageChange={handlePageChange}
+          onExitGuidedMode={() =>
+            setComfortSettings((prev) => ({ ...prev, guidedMode: false }))
+          }
+        />
+      )}
 
       {/* Main Page View Content */}
       <main className="flex-1">
@@ -143,6 +230,8 @@ export default function App() {
             currentLanguage={currentLanguage}
             onPageChange={handlePageChange}
             onSelectPatient={handleSelectPatientById}
+            onOpenComfortMode={() => setComfortOpen(true)}
+            onResetDemo={handleResetDemo}
           />
         )}
 
@@ -155,6 +244,44 @@ export default function App() {
             onSearchAppointment={handleSearchAppointment}
             allAppointments={appointments}
             onSelectAppointment={(apt) => setSelectedAppointment(apt)}
+            completedTasks={completedTasks}
+            onToggleTask={handleToggleTask}
+          />
+        )}
+
+        {currentPage === 'journey' && (
+          <CareJourneyView
+            currentLanguage={currentLanguage}
+            appointment={selectedAppointment}
+            completedTasks={completedTasks}
+            onToggleTask={handleToggleTask}
+            onPageChange={handlePageChange}
+          />
+        )}
+
+        {currentPage === 'clarity' && (
+          <ClarityView
+            currentLanguage={currentLanguage}
+            onPageChange={handlePageChange}
+          />
+        )}
+
+        {currentPage === 'carecircle' && (
+          <CareCircleView
+            currentLanguage={currentLanguage}
+            appointment={selectedAppointment}
+            sharing={careCircleSharing}
+            onUpdateSharing={setCareCircleSharing}
+            completedTasks={completedTasks}
+            onPageChange={handlePageChange}
+          />
+        )}
+
+        {currentPage === 'passport' && (
+          <VisitPassportView
+            currentLanguage={currentLanguage}
+            appointment={selectedAppointment}
+            onPageChange={handlePageChange}
           />
         )}
 
@@ -203,7 +330,7 @@ export default function App() {
             appointments={appointments}
             onSelectAppointment={(apt) => {
               setSelectedAppointment(apt);
-              setCurrentPage('appointment');
+              handlePageChange('appointment');
             }}
             onUpdateAppointment={handleUpdateAppointment}
             onAddAppointment={handleAddAppointment}
@@ -212,20 +339,17 @@ export default function App() {
         )}
       </main>
 
-      {/* Quick Floating Get Help Navigation Button */}
-      <div className="fixed bottom-5 right-5 z-30 flex items-center gap-2">
-        <button
-          onClick={() => handlePageChange('help')}
-          className="flex items-center gap-2.5 bg-[#BEA06D] hover:bg-[#8F7242] active:scale-95 text-white font-bold py-3 px-5 rounded-full shadow-xl shadow-[#BEA06D]/40 border-2 border-white/80 transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#BEA06D]/40"
-          title={currentLanguage === 'kn' ? 'ಸಹಾಯ ಪಡೆಯಿರಿ' : currentLanguage === 'te' ? 'సహాయం పొందండి' : 'Get Help'}
-          aria-label={currentLanguage === 'kn' ? 'ಸಹಾಯ ಪಡೆಯಿರಿ' : currentLanguage === 'te' ? 'సహాయం పొందండి' : 'Get Help'}
-        >
-          <HelpCircle className="w-5 h-5 text-white" />
-          <span className="text-xs sm:text-sm font-semibold">
-            {currentLanguage === 'kn' ? 'ಸಹಾಯ ಪಡೆಯಿರಿ' : currentLanguage === 'te' ? 'సహాయం పొందండి' : 'Get Help'}
-          </span>
-        </button>
-      </div>
+      {/* Floating Minimal CORE Companion Assistant */}
+      <CoreCompanion
+        language={currentLanguage}
+        currentPage={currentPage}
+        isOpen={companionOpen}
+        onToggleOpen={setCompanionOpen}
+        onPageChange={handlePageChange}
+        onOpenComfortMode={() => setComfortOpen(true)}
+        reduceMotion={comfortSettings.reduceMotion}
+        resetSignal={demoResetSignal}
+      />
 
       {/* Footer */}
       <Footer

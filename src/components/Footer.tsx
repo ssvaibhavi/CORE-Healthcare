@@ -18,7 +18,7 @@ export const Footer: React.FC<FooterProps> = ({
   const t = TRANSLATIONS[currentLanguage];
 
   return (
-    <footer className="bg-white border-t border-[#BEA06D]/30 pt-16 pb-12 text-[#3C3330] mt-auto">
+    <footer className="bg-white border-t border-[#BEA06D]/30 pt-16 pb-12 text-[#3C3330] mt-auto no-print">
       {/* Delicate gold divider */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="gold-divider mb-12" />
@@ -102,9 +102,41 @@ export const Footer: React.FC<FooterProps> = ({
               <li>
                 <button
                   onClick={() => onPageChange('about')}
-                  className="hover:text-[#8F7242] transition-colors"
+                  className="hover:text-[#8F7242] transition-colors cursor-pointer"
                 >
                   {t.nav.about}
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onPageChange('journey')}
+                  className="hover:text-[#8F7242] transition-colors cursor-pointer"
+                >
+                  {currentLanguage === 'kn' ? 'ನನ್ನ ಆರೈಕೆ ಪಯಣ' : currentLanguage === 'te' ? 'నా ఆరోగ్య ప్రయాణం' : 'My Care Journey'}
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onPageChange('clarity')}
+                  className="hover:text-[#8F7242] transition-colors cursor-pointer"
+                >
+                  {currentLanguage === 'kn' ? 'ಸರಳವಾಗಿ ವಿವರಿಸಿ (Clarity)' : currentLanguage === 'te' ? 'సులభంగా వివరించండి (Clarity)' : 'Explain It Simply'}
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onPageChange('carecircle')}
+                  className="hover:text-[#8F7242] transition-colors cursor-pointer"
+                >
+                  CareCircle
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onPageChange('passport')}
+                  className="hover:text-[#8F7242] transition-colors cursor-pointer"
+                >
+                  {currentLanguage === 'kn' ? 'ನನ್ನ ವಿಸಿಟ್ ಪಾಸ್‌ಪೋರ್ಟ್' : currentLanguage === 'te' ? 'నా విజిట్ పాస్‌పోర్ట్' : 'My Visit Passport'}
                 </button>
               </li>
             </ul>

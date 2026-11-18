@@ -2,19 +2,37 @@ import React from 'react';
 import { ASSETS } from '../assets/images';
 import { Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
-import { Volume2, Calendar, Bell, Clock, Phone, Sparkles, ArrowRight, ShieldCheck, HeartHandshake } from 'lucide-react';
+import { TOOLKIT_LABELS } from '../data/enhancementsData';
+import {
+  Volume2,
+  Calendar,
+  Bell,
+  Phone,
+  Sparkles,
+  ArrowRight,
+  HeartHandshake,
+  CalendarClock,
+  BookOpen,
+  Users,
+  FileCheck2
+} from 'lucide-react';
 import { ScenarioSpotlight } from '../components/ScenarioSpotlight';
+import { DemoExperienceBar } from '../components/DemoExperienceBar';
 
 interface HomeViewProps {
   currentLanguage: Language;
   onPageChange: (page: PageView) => void;
   onSelectPatient: (patientId: string) => void;
+  onOpenComfortMode: () => void;
+  onResetDemo: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   currentLanguage,
   onPageChange,
   onSelectPatient,
+  onOpenComfortMode,
+  onResetDemo,
 }) => {
   const t = TRANSLATIONS[currentLanguage];
 
@@ -197,6 +215,67 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onPageChange={onPageChange}
         />
       </div>
+
+      {/* CORE Patient Toolkit — Interactive Care Enhancements */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-10 space-y-3">
+          <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+            {TOOLKIT_LABELS.sectionKicker[currentLanguage]}
+          </span>
+          <h2 className="font-display text-3xl sm:text-4xl font-bold text-[#3C3330]">
+            {TOOLKIT_LABELS.sectionTitle[currentLanguage]}
+          </h2>
+          <p className="text-sm sm:text-base text-[#3C3330]/80">
+            {TOOLKIT_LABELS.sectionSubtitle[currentLanguage]}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {TOOLKIT_LABELS.items.map((item, idx) => {
+            const toolkitIcons = [
+              <CalendarClock key="journey" className="w-8 h-8 text-[#8F7242]" />,
+              <BookOpen key="clarity" className="w-8 h-8 text-[#4A6347]" />,
+              <Users key="carecircle" className="w-8 h-8 text-[#C98897]" />,
+              <FileCheck2 key="passport" className="w-8 h-8 text-[#BEA06D]" />,
+            ];
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onPageChange(item.id)}
+                className="group text-left p-6 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-3xl shadow-sm botanical-card-hover transition-all flex flex-col justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#BEA06D]"
+              >
+                <div className="space-y-3.5">
+                  <div className="w-14 h-14 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/25 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    {toolkitIcons[idx]}
+                  </div>
+                  <h3 className="font-display text-xl font-bold text-[#3C3330] group-hover:text-[#8F7242] transition-colors">
+                    {item.title[currentLanguage]}
+                  </h3>
+                  <p className="text-sm text-[#3C3330]/80 leading-relaxed">
+                    {item.desc[currentLanguage]}
+                  </p>
+                </div>
+
+                <div className="pt-5 mt-4 border-t border-[#BEA06D]/15 flex items-center justify-between text-sm font-semibold text-[#8F7242] w-full">
+                  <span>{item.cta[currentLanguage]}</span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Explore Interactive Demo Bar with Reset Demo */}
+      <DemoExperienceBar
+        language={currentLanguage}
+        onPageChange={onPageChange}
+        onSelectDemoPatient={() => onSelectPatient('APT-2026-4289')}
+        onOpenComfortMode={onOpenComfortMode}
+        onResetDemo={onResetDemo}
+      />
 
       {/* Philosophical Reassurance Banner */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

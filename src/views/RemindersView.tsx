@@ -424,6 +424,18 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
                   ✓ {t.reminders.preferencesSavedMsg}
                 </div>
               )}
+
+              <button
+                type="button"
+                onClick={() => onPageChange('carecircle')}
+                className="mt-3 w-full py-2.5 px-4 rounded-xl bg-[#FCF9F5] hover:bg-[#BEA06D]/15 border border-[#BEA06D]/40 text-xs font-semibold text-[#8F7242] transition-colors cursor-pointer"
+              >
+                {currentLanguage === 'kn'
+                  ? 'CareCircle ಸಮ್ಮತಿ ಮತ್ತು ಪೂರ್ವವೀಕ್ಷಣೆ ತೆರೆಯಿರಿ →'
+                  : currentLanguage === 'te'
+                  ? 'CareCircle అనుమతి & ప్రివ్యూ తెరవండి →'
+                  : 'Open CareCircle Consent & Caregiver Preview →'}
+              </button>
             </div>
           </div>
         </div>
