@@ -14,16 +14,30 @@ export type PageView =
   | 'journey'
   | 'clarity'
   | 'carecircle'
-  | 'passport';
+  | 'passport'
+  | 'intelligence'
+  | 'voicebridge'
+  | 'sense'
+  | 'carecompass'
+  | 'careflow'
+  | 'accessibility-lab'
+  | 'insights'
+  | 'showcase'
+  | 'stories';
+
+export type ExplanationComplexity = 'extra_simple' | 'simple' | 'detailed';
+export type MotionMode = 'full' | 'gentle' | 'none';
 
 export interface ComfortSettings {
   textSize: TextSize;
   highContrast: boolean;
   reduceMotion: boolean;
+  motionMode?: MotionMode;
   simplifiedNav: boolean;
   largeButtons: boolean;
   readAloud: boolean;
   guidedMode: boolean;
+  explanationComplexity?: ExplanationComplexity;
 }
 
 export interface CareCircleSharingSettings {
@@ -33,6 +47,35 @@ export interface CareCircleSharingSettings {
   shareChecklist: boolean;
   shareReminders: boolean;
   shareDirections: boolean;
+  handoffMode?: 'session_only' | '24_hours';
+}
+
+export interface IntelligenceProfile {
+  completedOnboarding: boolean;
+  preferredLanguage: Language;
+  visitorRole: 'self' | 'caregiver';
+  firstHospitalVisit: boolean;
+  preferStepByStep: boolean;
+  supportNeeds: 'standard' | 'large_text' | 'voice_first' | 'both';
+  assistanceGoal: 'check_details' | 'prepare_visit' | 'reschedule' | 'understand_terms' | 'full_support';
+}
+
+export interface CareCompassTask {
+  id: string;
+  category: 'documents' | 'questions' | 'travel' | 'reminders' | 'accessibility' | 'caregiver';
+  source: 'generic' | 'clinic_verify' | 'user_added';
+  completed: boolean;
+  text: string;
+}
+
+export interface ShowcaseProgress {
+  languageAndAccessibility: boolean;
+  carePathway: boolean;
+  careFlowProblem: boolean;
+  senseUnderstanding: boolean;
+  careCompassChecklist: boolean;
+  visitPassport: boolean;
+  caregiverHandoff: boolean;
 }
 
 export interface CaregiverInfo {

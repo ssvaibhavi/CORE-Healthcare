@@ -1,5 +1,5 @@
 import React from 'react';
-import { ASSETS } from '../assets/images';
+import { CoreMonogramMark } from './BotanicalMotifs';
 import { Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { Phone, Heart, Globe, Shield, Sparkles } from 'lucide-react';
@@ -27,19 +27,12 @@ export const Footer: React.FC<FooterProps> = ({
           {/* Col 1: Brand & Philosophy */}
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full overflow-hidden border border-[#BEA06D]/50 bg-[#FCF9F5]">
-                <img
-                  src={ASSETS.logoEmblem}
-                  alt="CORE Emblem"
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
+              <CoreMonogramMark size="md" />
               <div>
-                <span className="font-display text-2xl font-bold tracking-wider text-[#3C3330]">
+                <span className="font-display text-2xl font-bold tracking-wider text-[#493C39]">
                   CORE
                 </span>
-                <p className="text-xs text-[#8F7242] font-medium leading-tight">
+                <p className="text-xs text-[#C88F98] font-medium leading-tight">
                   {t.tagline}
                 </p>
               </div>
@@ -169,6 +162,42 @@ export const Footer: React.FC<FooterProps> = ({
                 <span>{t.nav.getHelp}</span>
                 <span>→</span>
               </button>
+
+              <div className="pt-3 border-t border-[#BEA06D]/20">
+                <span className="text-[11px] font-bold text-[#8F7242] uppercase tracking-wider flex items-center gap-1 mb-2">
+                  <Sparkles className="w-3 h-3 text-[#BEA06D]" />
+                  <span>
+                    {currentLanguage === 'kn'
+                      ? 'CORE ನಾವೀನ್ಯತೆ ಸೂಟ್'
+                      : currentLanguage === 'te'
+                      ? 'CORE ఇన్నోవేషన్ సూట్'
+                      : 'CORE Innovation Suite'}
+                  </span>
+                </span>
+                <div className="grid grid-cols-2 gap-1.5 text-xs">
+                  {(
+                    [
+                      { id: 'showcase', label: 'Showcase' },
+                      { id: 'stories', label: 'Care Stories' },
+                      { id: 'intelligence', label: 'Intelligence' },
+                      { id: 'voicebridge', label: 'VoiceBridge' },
+                      { id: 'sense', label: 'CORE Sense' },
+                      { id: 'carecompass', label: 'CareCompass' },
+                      { id: 'careflow', label: 'CareFlow' },
+                      { id: 'accessibility-lab', label: 'A11y Lab' },
+                      { id: 'insights', label: 'Insights' },
+                    ] as Array<{ id: PageView; label: string }>
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => onPageChange(item.id)}
+                      className="text-left hover:text-[#8F7242] transition-colors cursor-pointer py-0.5"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 

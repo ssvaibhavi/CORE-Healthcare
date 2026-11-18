@@ -6,6 +6,8 @@ import {
   PageView
 } from '../types';
 import { CARE_JOURNEY_STAGES } from '../data/enhancementsData';
+import { downloadPlainTextSummary } from '../utils/calendarExport';
+import { Reveal, WordReveal } from '../components/Reveal';
 import {
   ArrowLeft,
   ShieldCheck,
@@ -19,7 +21,10 @@ import {
   Eye,
   EyeOff,
   Info,
-  ArrowRight
+  ArrowRight,
+  Download,
+  Printer,
+  Clock
 } from 'lucide-react';
 
 interface CareCircleViewProps {
@@ -69,6 +74,46 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
 
   const beforeTasks = CARE_JOURNEY_STAGES[0].tasks;
 
+  const buildHandoffText = (): string => {
+    const lines: string[] = [
+      'CORE Connect — Patient-Consented Caregiver Handoff Summary',
+      `Prepared For: ${caregiverName} (${caregiverRelation})`,
+      `Patient Consent: Granted (${sharing.consentTimestamp || 'Current Session'})`,
+      `Access Scope: ${sharing.handoffMode === '24_hours' ? '24-Hour Demonstration Window' : 'Current Session Only'}`,
+      '------------------------------------------------------------',
+    ];
+    if (sharing.shareAppointmentOverview) {
+      lines.push(`Hospital: ${appointment.hospitalName}`);
+      lines.push(`Date & Time: ${appointment.date} (${appointment.dayOfWeek}) at ${appointment.time}`);
+    }
+    if (sharing.shareDirections) {
+      lines.push(`Location: ${appointment.roomNumber}`);
+      lines.push(`Directions: ${appointment.directions[currentLanguage]}`);
+    }
+    if (sharing.shareChecklist) {
+      lines.push('Preparation Checklist:');
+      beforeTasks.forEach((t) => {
+        lines.push(`  [${completedTasks[t.id] ? 'x' : ' '}] ${t.label[currentLanguage]}`);
+      });
+    }
+    if (sharing.shareReminders) {
+      lines.push(
+        `Reminder Channels: ${
+          [
+            appointment.reminderPreferences.voiceCall ? 'Voice Call' : '',
+            appointment.reminderPreferences.sms ? 'Native SMS' : '',
+            appointment.reminderPreferences.whatsapp ? 'WhatsApp' : '',
+          ]
+            .filter(Boolean)
+            .join(', ') || 'None'
+        }`
+      );
+    }
+    lines.push('------------------------------------------------------------');
+    lines.push('Note: Demonstration summary only. No sensitive clinical records included and no external server transmission occurred.');
+    return lines.join('\n');
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8 soft-fade-up">
       {/* Top Bar */}
@@ -93,41 +138,50 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
       </div>
 
       {/* Header */}
-      <div className="text-center max-w-3xl mx-auto space-y-3">
-        <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-          CORE CareCircle
-        </span>
-        <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
-          {currentLanguage === 'kn'
-            ? 'CareCircle — ಸಮ್ಮತಿ ಆಧಾರಿತ ಕುಟುಂಬ ನೆರವು'
-            : currentLanguage === 'te'
-            ? 'CareCircle — అనుమతితో కూడిన కుటుంబ సహాయం'
-            : 'CareCircle — Caregiver Support With Dignity'}
-        </h1>
-        <p className="text-sm sm:text-base text-[#3C3330]/80">
-          {currentLanguage === 'kn'
-            ? 'ನಿಮ್ಮ ವಿಶ್ವಾಸಾರ್ಹ ಕುಟುಂಬಸ್ಥರು ಯಾವ ಮಾಹಿತಿಯನ್ನು ಮಾತ್ರ ನೋಡಬಹುದು ಎಂಬುದನ್ನು ನೀವೇ ಆಯ್ಕೆ ಮಾಡಿ.'
-            : currentLanguage === 'te'
-            ? 'మీ కుటుంబ సభ్యులు ఏ సమాచారం మాత్రమే చూడగలరో మీరే స్వయంగా నిర్ణయించుకోండి.'
-            : 'Choose exactly which non-sensitive visit details your trusted caregiver can see — after your clear consent.'}
-        </p>
-      </div>
+      <Reveal>
+        <div className="text-center max-w-3xl mx-auto space-y-3">
+          <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+            CORE CareCircle
+          </span>
+          <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
+            <WordReveal
+              text={
+                currentLanguage === 'kn'
+                  ? 'CareCircle — ಸಮ್ಮತಿ ಆಧಾರಿತ ಕುಟುಂಬ ನೆರವು'
+                  : currentLanguage === 'te'
+                  ? 'CareCircle — అనుమతితో కూడిన కుటుంబ సహాయం'
+                  : 'CareCircle — Caregiver Support With Dignity'
+              }
+            />
+          </h1>
+          <p className="text-sm sm:text-base text-[#3C3330]/80">
+            {currentLanguage === 'kn'
+              ? 'ನಿಮ್ಮ ವಿಶ್ವಾಸಾರ್ಹ ಕುಟುಂಬಸ್ಥರು ಯಾವ ಮಾಹಿತಿಯನ್ನು ಮಾತ್ರ ನೋಡಬಹುದು ಎಂಬುದನ್ನು ನೀವೇ ಆಯ್ಕೆ ಮಾಡಿ.'
+              : currentLanguage === 'te'
+              ? 'మీ కుటుంబ సభ్యులు ఏ సమాచారం మాత్రమే చూడగలరో మీరే స్వయంగా నిర్ణయించుకోండి.'
+              : 'Choose exactly which non-sensitive visit details your trusted caregiver can see — after your clear consent.'}
+          </p>
+        </div>
+      </Reveal>
 
       {/* Prototype Privacy Banner */}
-      <div className="p-4 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/40 flex items-start gap-3 text-xs sm:text-sm text-[#3C3330]">
-        <Info className="w-5 h-5 text-[#8F7242] shrink-0 mt-0.5" />
-        <p>
-          {currentLanguage === 'kn'
-            ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಸೂಚನೆ: ಈ ವಿಭಾಗವು ರೋಗಿಯ ನಿಯಂತ್ರಣವನ್ನು ತೋರಿಸುತ್ತದೆ. ಯಾವುದೇ ನಿಜವಾದ ಸಂದೇಶ ಕಳುಹಿಸಲಾಗುವುದಿಲ್ಲ ಮತ್ತು ಯಾವುದೇ ಸಾರ್ವಜನಿಕ ಲಿಂಕ್ ರಚಿಸಲಾಗುವುದಿಲ್ಲ.'
-            : currentLanguage === 'te'
-            ? 'డెమో గమనిక: ఇది రోగి నియంత్రణను చూపే ప్రోటోటైప్. బయటకు ఎలాంటి మెసేజ్లు పంపబడవు మరియు పబ్లిక్ లింకులు సృష్టించబడవు.'
-            : 'Prototype Notice: This demonstrates patient-controlled sharing locally. No external messages are sent, no real hospital records are accessed, and no public sharing links are generated.'}
-        </p>
-      </div>
+      <Reveal delay={70}>
+        <div className="p-4 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/40 flex items-start gap-3 text-xs sm:text-sm text-[#3C3330]">
+          <Info className="w-5 h-5 text-[#8F7242] shrink-0 mt-0.5" />
+          <p>
+            {currentLanguage === 'kn'
+              ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಸೂಚನೆ: ಈ ವಿಭಾಗವು ರೋಗಿಯ ನಿಯಂತ್ರಣವನ್ನು ತೋರಿಸುತ್ತದೆ. ಯಾವುದೇ ನಿಜವಾದ ಸಂದೇಶ ಕಳುಹಿಸಲಾಗುವುದಿಲ್ಲ ಮತ್ತು ಯಾವುದೇ ಸಾರ್ವಜನಿಕ ಲಿಂಕ್ ರಚಿಸಲಾಗುವುದಿಲ್ಲ.'
+              : currentLanguage === 'te'
+              ? 'డెమో గమనిక: ఇది రోగి నియంత్రణను చూపే ప్రోటోటైప్. బయటకు ఎలాంటి మెసేజ్లు పంపబడవు మరియు పబ్లిక్ లింకులు సృష్టించబడవు.'
+              : 'Prototype Notice: This demonstrates patient-controlled sharing locally. No external messages are sent, no real hospital records are accessed, and no public sharing links are generated.'}
+          </p>
+        </div>
+      </Reveal>
 
       {/* Step 1: Explicit Patient Consent Card */}
-      <div
-        className={`rounded-3xl border-2 p-6 sm:p-8 shadow-sm transition-all ${
+      <Reveal delay={110} variant="bloom">
+        <div
+          className={`rounded-3xl border-2 p-6 sm:p-8 shadow-sm transition-all ${
           sharing.consentGranted
             ? 'bg-[#A2B29B]/15 border-[#4A6347]/50'
             : 'bg-white border-[#BEA06D]'
@@ -214,7 +268,8 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
             )}
           </div>
         </div>
-      </div>
+        </div>
+      </Reveal>
 
       {/* Main Split: Patient Controls (Left) + Live Caregiver Dashboard Prototype (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -299,6 +354,48 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
                 </label>
               );
             })}
+          </div>
+
+          {/* Permission Scope Management */}
+          <div className="pt-3 border-t border-[#BEA06D]/20 space-y-2">
+            <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              <span>
+                {currentLanguage === 'kn'
+                  ? 'ಅನುಮತಿಯ ಅವಧಿ (Demo Permission)'
+                  : currentLanguage === 'te'
+                  ? 'అనుమతి వ్యవధి (Demo Permission)'
+                  : 'Permission Scope (Demonstration)'}
+              </span>
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                {
+                  id: 'session_only' as const,
+                  label: { kn: 'ಈ ಸೆಷನ್ ಮಾತ್ರ', te: 'ఈ సెషన్ మాత్రమే', en: 'Current Session Only' },
+                },
+                {
+                  id: '24_hours' as const,
+                  label: { kn: '೨೪ ಗಂಟೆಗಳ ಸಾರಾಂಶ', te: '24 గంటల వ్యవధి', en: '24-Hour Handoff Window' },
+                },
+              ].map((opt) => {
+                const isSelected = (sharing.handoffMode || 'session_only') === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onUpdateSharing({ ...sharing, handoffMode: opt.id })}
+                    className={`py-2 px-3 rounded-xl border text-xs font-semibold cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'bg-[#BEA06D] border-[#BEA06D] text-white'
+                        : 'bg-[#FCF9F5] border-[#BEA06D]/30 text-[#3C3330]'
+                    }`}
+                  >
+                    {opt.label[currentLanguage]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -488,24 +585,86 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
                   </p>
                 )}
 
-              <div className="pt-2 flex justify-end">
-                <button
-                  onClick={() => onPageChange('reminders')}
-                  className="compact-chip text-xs font-bold text-[#8F7242] hover:text-[#3C3330] inline-flex items-center gap-1 cursor-pointer underline"
-                >
-                  <span>
+              <div className="pt-3 border-t border-[#BEA06D]/20 space-y-3">
+                <div className="p-4 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/35 space-y-2 no-print">
+                  <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
                     {currentLanguage === 'kn'
-                      ? 'ಜ್ಞಾಪನೆ ಸೆಟ್ಟಿಂಗ್‌ಗೆ ಹೋಗಿ'
+                      ? 'ಆರೈಕೆದಾರರಿಗೆ ಕಾಣಿಸುವ ನಿಖರ ಹ್ಯಾಂಡ್‌ಆಫ್ ಪಠ್ಯ'
                       : currentLanguage === 'te'
-                      ? 'రిమైండర్ సెట్టింగ్స్ చూడండి'
-                      : 'Configure Reminder Rules'}
+                      ? 'సంరక్షకుడికి అందే ఖచ్చితమైన హ్యాండ్‌ఆఫ్ సారాంశం'
+                      : 'Exact Consented Handoff Summary Preview'}
                   </span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                  <pre className="text-xs text-[#3C3330]/85 whitespace-pre-wrap font-sans leading-relaxed bg-white p-3 rounded-xl border border-[#BEA06D]/20">
+                    {buildHandoffText()}
+                  </pre>
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadPlainTextSummary(buildHandoffText(), 'core-caregiver-handoff.txt')
+                      }
+                      className="compact-chip py-2 px-4 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>
+                        {currentLanguage === 'kn'
+                          ? 'ಹ್ಯಾಂಡ್‌ಆಫ್ ಸಾರಾಂಶ ಡೌನ್‌ಲೋಡ್'
+                          : currentLanguage === 'te'
+                          ? 'హ్యాండ్‌ఆఫ్ సారాంశం డౌన్‌లోడ్'
+                          : 'Download Handoff Summary'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="compact-chip py-2 px-4 rounded-full bg-[#BEA06D] hover:bg-[#8F7242] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>
+                        {currentLanguage === 'kn' ? 'ಪ್ರಿಂಟ್' : currentLanguage === 'te' ? 'ప్రింట్' : 'Print Card'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => onPageChange('reminders')}
+                    className="compact-chip text-xs font-bold text-[#8F7242] hover:text-[#3C3330] inline-flex items-center gap-1 cursor-pointer underline"
+                  >
+                    <span>
+                      {currentLanguage === 'kn'
+                        ? 'ಜ್ಞಾಪನೆ ಸೆಟ್ಟಿಂಗ್‌ಗೆ ಹೋಗಿ'
+                        : currentLanguage === 'te'
+                        ? 'రిమైండర్ సెట్టింగ్స్ చూడండి'
+                        : 'Configure Reminder Rules'}
+                    </span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
+      </div>
+
+      {/* Simulated vs. Real Secure Caregiver Connection Explanation */}
+      <div className="bg-white border border-[#BEA06D]/35 rounded-3xl p-6 shadow-xs space-y-2 text-xs sm:text-sm text-[#3C3330]/85 no-print">
+        <h3 className="font-display text-xl font-bold text-[#3C3330]">
+          {currentLanguage === 'kn'
+            ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಹಂಚಿಕೆ vs ನೈಜ ಸುರಕ್ಷಿತ ಸಂಪರ್ಕ'
+            : currentLanguage === 'te'
+            ? 'డెమో భాగస్వామ్యం vs నిజమైన సురక్షిత అనుసంధానం'
+            : 'Simulated Local Handoff vs. Real Secure Backend Integration'}
+        </h3>
+        <p>
+          {currentLanguage === 'kn'
+            ? 'ಈ ಪ್ರಾತ್ಯಕ್ಷಿಕೆಯಲ್ಲಿ, ರೋಗಿಯ ಅನುಮತಿ ಮತ್ತು ಹ್ಯಾಂಡ್‌ಆಫ್ ಪೂರ್ವವೀಕ್ಷಣೆಯು ನಿಮ್ಮ ಸಾಧನದಲ್ಲೇ ತಾತ್ಕಾಲಿಕವಾಗಿ ನಡೆಯುತ್ತದೆ; ಯಾವುದೇ ಸಾರ್ವಜನಿಕ ಲಿಂಕ್ ಅಥವಾ ಹೊರಗಿನ ಸರ್ವರ್‌ಗೆ ಮಾಹಿತಿ ಹೋಗುವುದಿಲ್ಲ. ನೈಜ ಆಸ್ಪತ್ರೆ ಬಳಕೆಯಲ್ಲಿ ಇದಕ್ಕೆ ದೃಢೀಕೃತ OTP/ಟೋಕನ್ ಮತ್ತು ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಿದ ಸರ್ವರ್ ಸಮ್ಮತಿ ದಾಖಲೆ ಅಗತ್ಯವಿರುತ್ತದೆ.'
+            : currentLanguage === 'te'
+            ? 'ఈ ప్రోటోటైప్‌లో రోగి అనుమతి మరియు హ్యాండ్‌ఆఫ్ ప్రివ్యూ మీ బ్రౌజర్‌లోనే స్థానికంగా ఉంటాయి; బయటి సర్వర్లకు డేటా పంపబడదు. నిజమైన ఆసుపత్రి వ్యవస్థలో OTP ఆధారిత ధృవీకరణ మరియు ఎన్‌క్రిప్టెడ్ బ్యాకెండ్ అనుమతి అవసరం ఉంటుంది.'
+            : 'In this demonstration, consent toggles and handoff downloads operate strictly inside your browser without public URLs or external transmission. A production clinical connection would require verified OTP authentication, encrypted server-side consent tokens, and audited revocation logs.'}
+        </p>
       </div>
     </div>
   );

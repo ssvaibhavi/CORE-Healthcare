@@ -1,19 +1,13 @@
 import React from 'react';
-import { ASSETS } from '../assets/images';
+import { BotanicalBannerPlate } from '../components/BotanicalMotifs';
+import { Reveal, WordReveal } from '../components/Reveal';
 import { Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { speechService } from '../utils/speech';
 import {
   Volume2,
-  Globe,
-  CheckCircle2,
-  Users,
-  Smartphone,
   ArrowRight,
-  Sparkles,
-  ShieldCheck,
-  Signal,
-  BatteryCharging
+  Signal
 } from 'lucide-react';
 
 interface HowItWorksViewProps {
@@ -34,69 +28,56 @@ export const HowItWorksView: React.FC<HowItWorksViewProps> = ({
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-12">
       {/* Header */}
-      <div className="text-center max-w-3xl mx-auto space-y-3">
-        <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-          {currentLanguage === 'kn' ? 'ಸರಳ ಪ್ರಕ್ರಿಯೆ' : currentLanguage === 'te' ? 'సరళమైన విధానం' : 'Patient-Centered Design'}
-        </span>
-        <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
-          {t.howItWorksPage.title}
-        </h1>
-        <p className="text-sm sm:text-base text-[#3C3330]/80">
-          {t.howItWorksPage.subtitle}
-        </p>
-      </div>
-
-      {/* Visual Botanical Banner */}
-      <div className="relative rounded-3xl overflow-hidden border border-[#BEA06D]/30 shadow-md aspect-[16/6] bg-[#FCF9F5]">
-        <img
-          src={ASSETS.botanicalVoiceCare}
-          alt="Vintage botanical illustration"
-          className="w-full h-full object-cover"
-          referrerPolicy="no-referrer"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-white/90 via-white/70 to-transparent flex items-center p-6 sm:p-10">
-          <div className="max-w-md space-y-2">
-            <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider">
-              {t.tagline}
-            </span>
-            <h3 className="font-display text-2xl sm:text-3xl font-bold text-[#3C3330]">
-              {t.about.philosophyQuote}
-            </h3>
-          </div>
+      <Reveal>
+        <div className="text-center max-w-3xl mx-auto space-y-3">
+          <span className="text-xs font-bold text-[#8A6D3F] uppercase tracking-widest block">
+            {currentLanguage === 'kn' ? 'ಸರಳ ಪ್ರಕ್ರಿಯೆ' : currentLanguage === 'te' ? 'సరళమైన విధానం' : 'Patient-Centered Design'}
+          </span>
+          <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#493C39] text-balance">
+            <WordReveal text={t.howItWorksPage.title} />
+          </h1>
+          <p className="text-sm sm:text-base text-[#493C39]/80">
+            {t.howItWorksPage.subtitle}
+          </p>
         </div>
-      </div>
+      </Reveal>
+
+      {/* Handcrafted Botanical Line-Art Editorial Banner */}
+      <Reveal delay={120}>
+        <BotanicalBannerPlate
+          kicker={t.tagline}
+          quote={t.about.philosophyQuote}
+        />
+      </Reveal>
 
       {/* Numbered Steps with Voice Guidance */}
       <div className="space-y-6">
         {t.howItWorksPage.steps.map((step, idx) => (
-          <div
-            key={idx}
-            className="p-6 sm:p-8 bg-white border border-[#BEA06D]/30 hover:border-[#BEA06D] rounded-3xl shadow-sm transition-all flex flex-col sm:flex-row items-start gap-6 group"
-          >
-            {/* Step Number Circle */}
-            <div className="w-14 h-14 rounded-2xl bg-[#BEA06D] text-white font-display text-2xl font-bold flex items-center justify-center shrink-0 shadow-md shadow-[#BEA06D]/20 group-hover:scale-105 transition-transform">
-              {step.number}
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="font-display text-xl sm:text-2xl font-bold text-[#3C3330]">
-                  {step.title}
-                </h3>
-                <button
-                  onClick={() => handleSpeakStep(step.title, step.desc)}
-                  className="p-2 rounded-full bg-[#BEA06D]/15 text-[#8F7242] hover:bg-[#BEA06D]/30 transition-colors"
-                  title="Listen to this step"
-                >
-                  <Volume2 className="w-5 h-5" />
-                </button>
+          <Reveal key={idx} delay={Math.min(idx * 120, 480)}>
+            <div className="p-6 sm:p-8 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-3xl shadow-xs botanical-card-hover flex flex-col sm:flex-row items-start gap-6 group">
+              <div className="w-14 h-14 rounded-2xl bg-[#C88F98] text-white font-display text-2xl font-bold flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform duration-300">
+                {step.number}
               </div>
-              <p className="text-sm sm:text-base text-[#3C3330]/80 leading-relaxed">
-                {step.desc}
-              </p>
+
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display text-xl sm:text-2xl font-bold text-[#493C39]">
+                    {step.title}
+                  </h3>
+                  <button
+                    onClick={() => handleSpeakStep(step.title, step.desc)}
+                    className="p-2 rounded-full bg-[#E6C1C4]/30 text-[#493C39] hover:bg-[#E6C1C4]/60 transition-colors cursor-pointer"
+                    title="Listen to this step"
+                  >
+                    <Volume2 className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-sm sm:text-base text-[#493C39]/80 leading-relaxed">
+                  {step.desc}
+                </p>
+              </div>
             </div>
-          </div>
+          </Reveal>
         ))}
       </div>
 

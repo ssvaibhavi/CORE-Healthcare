@@ -16,13 +16,26 @@ import { CareJourneyView } from './views/CareJourneyView';
 import { ClarityView } from './views/ClarityView';
 import { CareCircleView } from './views/CareCircleView';
 import { VisitPassportView } from './views/VisitPassportView';
+import { IntelligenceView } from './views/IntelligenceView';
+import { VoiceBridgeView } from './views/VoiceBridgeView';
+import { SenseView } from './views/SenseView';
+import { CareCompassView } from './views/CareCompassView';
+import { CareFlowView } from './views/CareFlowView';
+import { AccessibilityLabView } from './views/AccessibilityLabView';
+import { InsightsView } from './views/InsightsView';
+import { ShowcaseView } from './views/ShowcaseView';
+import { CareStoriesView } from './views/CareStoriesView';
+import { SmartSearchModal } from './components/SmartSearchModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { INITIAL_APPOINTMENTS } from './data/mockAppointments';
 import {
   Appointment,
   CareCircleSharingSettings,
   ComfortSettings,
+  IntelligenceProfile,
   Language,
-  PageView
+  PageView,
+  ShowcaseProgress
 } from './types';
 import { speechService } from './utils/speech';
 
@@ -30,11 +43,65 @@ const DEFAULT_COMFORT_SETTINGS: ComfortSettings = {
   textSize: 'normal',
   highContrast: false,
   reduceMotion: false,
+  motionMode: 'full',
   simplifiedNav: false,
   largeButtons: false,
   readAloud: true,
   guidedMode: false,
+  explanationComplexity: 'simple',
 };
+
+const LANGUAGE_STORAGE_KEY = 'core_ui_language';
+const UI_PREFS_STORAGE_KEY = 'core_ui_preferences';
+
+function getInitialLanguage(): Language {
+  if (typeof window === 'undefined') return 'en';
+  try {
+    const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (saved === 'en' || saved === 'kn' || saved === 'te') {
+      return saved;
+    }
+  } catch {
+    // Ignore storage read restrictions
+  }
+  return 'en';
+}
+
+function getInitialComfortSettings(): ComfortSettings {
+  if (typeof window === 'undefined') return DEFAULT_COMFORT_SETTINGS;
+  try {
+    const raw = window.localStorage.getItem(UI_PREFS_STORAGE_KEY);
+    if (!raw) return DEFAULT_COMFORT_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<ComfortSettings>;
+    const motionMode =
+      parsed.motionMode === 'full' || parsed.motionMode === 'gentle' || parsed.motionMode === 'none'
+        ? parsed.motionMode
+        : parsed.reduceMotion === true
+        ? 'none'
+        : 'full';
+    return {
+      textSize:
+        parsed.textSize === 'normal' || parsed.textSize === 'large' || parsed.textSize === 'xlarge'
+          ? parsed.textSize
+          : 'normal',
+      highContrast: typeof parsed.highContrast === 'boolean' ? parsed.highContrast : false,
+      motionMode,
+      reduceMotion: motionMode === 'none',
+      simplifiedNav: typeof parsed.simplifiedNav === 'boolean' ? parsed.simplifiedNav : false,
+      largeButtons: typeof parsed.largeButtons === 'boolean' ? parsed.largeButtons : false,
+      readAloud: typeof parsed.readAloud === 'boolean' ? parsed.readAloud : true,
+      guidedMode: typeof parsed.guidedMode === 'boolean' ? parsed.guidedMode : false,
+      explanationComplexity:
+        parsed.explanationComplexity === 'extra_simple' ||
+        parsed.explanationComplexity === 'simple' ||
+        parsed.explanationComplexity === 'detailed'
+          ? parsed.explanationComplexity
+          : 'simple',
+    };
+  } catch {
+    return DEFAULT_COMFORT_SETTINGS;
+  }
+}
 
 const DEFAULT_CARECIRCLE_SHARING: CareCircleSharingSettings = {
   consentGranted: false,
@@ -43,41 +110,124 @@ const DEFAULT_CARECIRCLE_SHARING: CareCircleSharingSettings = {
   shareChecklist: true,
   shareReminders: true,
   shareDirections: true,
+  handoffMode: 'session_only',
+};
+
+const DEFAULT_INTELLIGENCE_PROFILE: IntelligenceProfile = {
+  completedOnboarding: false,
+  preferredLanguage: 'en',
+  visitorRole: 'self',
+  firstHospitalVisit: true,
+  preferStepByStep: true,
+  supportNeeds: 'both',
+  assistanceGoal: 'full_support',
+};
+
+const DEFAULT_SHOWCASE_PROGRESS: ShowcaseProgress = {
+  languageAndAccessibility: false,
+  carePathway: false,
+  careFlowProblem: false,
+  senseUnderstanding: false,
+  careCompassChecklist: false,
+  visitPassport: false,
+  caregiverHandoff: false,
 };
 
 export default function App() {
-  const [currentLanguage, setCurrentLanguage] = useState<Language>('kn');
+  const [currentLanguage, setCurrentLanguage] = useState<Language>(getInitialLanguage);
   const [currentPage, setCurrentPage] = useState<PageView>('home');
-  const [comfortSettings, setComfortSettings] = useState<ComfortSettings>(DEFAULT_COMFORT_SETTINGS);
+  const [comfortSettings, setComfortSettings] = useState<ComfortSettings>(getInitialComfortSettings);
   const [comfortOpen, setComfortOpen] = useState<boolean>(false);
   const [companionOpen, setCompanionOpen] = useState<boolean>(false);
+  const [searchOpen, setSearchOpen] = useState<boolean>(false);
+  const [aiConsentGranted, setAiConsentGranted] = useState<boolean>(false);
   const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment>(INITIAL_APPOINTMENTS[0]);
   const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
   const [careCircleSharing, setCareCircleSharing] = useState<CareCircleSharingSettings>(
     DEFAULT_CARECIRCLE_SHARING
   );
+  const [intelligenceProfile, setIntelligenceProfile] = useState<IntelligenceProfile>(
+    DEFAULT_INTELLIGENCE_PROFILE
+  );
+  const [showcaseProgress, setShowcaseProgress] = useState<ShowcaseProgress>(
+    DEFAULT_SHOWCASE_PROGRESS
+  );
+  const [sessionActionsCount, setSessionActionsCount] = useState<number>(0);
   const [demoResetSignal, setDemoResetSignal] = useState<number>(0);
+
+  const effectiveMotionMode =
+    comfortSettings.motionMode ?? (comfortSettings.reduceMotion ? 'none' : 'full');
+
+  // Sync non-PII UI display preferences only (never health info or chat content)
+  useEffect(() => {
+    try {
+      const uiOnlyPrefs: ComfortSettings = {
+        textSize: comfortSettings.textSize,
+        highContrast: comfortSettings.highContrast,
+        reduceMotion: effectiveMotionMode === 'none',
+        motionMode: effectiveMotionMode,
+        simplifiedNav: comfortSettings.simplifiedNav,
+        largeButtons: comfortSettings.largeButtons,
+        readAloud: comfortSettings.readAloud,
+        guidedMode: comfortSettings.guidedMode,
+        explanationComplexity: comfortSettings.explanationComplexity,
+      };
+      window.localStorage.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(uiOnlyPrefs));
+    } catch {
+      // Ignore storage write errors
+    }
+  }, [comfortSettings, effectiveMotionMode]);
 
   // Sync accessibility classes to documentElement
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('high-contrast', comfortSettings.highContrast);
-    root.classList.toggle('reduce-motion', comfortSettings.reduceMotion);
+    root.classList.toggle('reduce-motion', effectiveMotionMode === 'none');
+    root.classList.toggle('gentle-motion', effectiveMotionMode === 'gentle');
     root.classList.toggle('large-targets', comfortSettings.largeButtons);
-  }, [comfortSettings.highContrast, comfortSettings.reduceMotion, comfortSettings.largeButtons]);
+  }, [comfortSettings.highContrast, effectiveMotionMode, comfortSettings.largeButtons]);
 
-  // Scroll to top on page switch
+  // Global keyboard shortcuts: Escape closes overlays; Ctrl/Cmd+K opens Smart Search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setComfortOpen(false);
+        setCompanionOpen(false);
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Scroll to top on page switch + track non-PII session progress
   const handlePageChange = (page: PageView) => {
     setCurrentPage(page);
+    setSessionActionsCount((c) => c + 1);
+    if (page === 'passport') {
+      setShowcaseProgress((prev) => ({ ...prev, visitPassport: true }));
+    }
     window.scrollTo({
       top: 0,
-      behavior: comfortSettings.reduceMotion ? 'auto' : 'smooth',
+      behavior: effectiveMotionMode === 'none' ? 'auto' : 'smooth',
     });
   };
 
   const handleLanguageChange = (lang: Language) => {
     setCurrentLanguage(lang);
+    try {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+    } catch {
+      // Ignore storage write errors
+    }
+    setShowcaseProgress((prev) => ({ ...prev, languageAndAccessibility: true }));
+    setSessionActionsCount((c) => c + 1);
     if (comfortSettings.readAloud) {
       const msg =
         lang === 'kn'
@@ -94,16 +244,29 @@ export default function App() {
       ...prev,
       [taskId]: !prev[taskId],
     }));
+    setSessionActionsCount((c) => c + 1);
   };
 
   const handleResetDemo = () => {
     speechService.stop();
+    try {
+      window.localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+      window.localStorage.removeItem(UI_PREFS_STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+    setCurrentLanguage('en');
     setAppointments(INITIAL_APPOINTMENTS);
     setSelectedAppointment(INITIAL_APPOINTMENTS[0]);
     setCompletedTasks({});
     setCareCircleSharing(DEFAULT_CARECIRCLE_SHARING);
     setComfortSettings(DEFAULT_COMFORT_SETTINGS);
+    setIntelligenceProfile(DEFAULT_INTELLIGENCE_PROFILE);
+    setShowcaseProgress(DEFAULT_SHOWCASE_PROGRESS);
+    setAiConsentGranted(false);
+    setSessionActionsCount(0);
     setComfortOpen(false);
+    setSearchOpen(false);
     setDemoResetSignal((c) => c + 1);
   };
 
@@ -199,13 +362,15 @@ export default function App() {
         }
         comfortOpen={comfortOpen}
         onToggleComfortOpen={() => setComfortOpen((prev) => !prev)}
+        onOpenSearch={() => setSearchOpen(true)}
       />
 
-      {/* Functional CORE Comfort Mode Drawer */}
+      {/* Functional CORE Experience Settings Drawer */}
       <ComfortModePanel
         isOpen={comfortOpen}
         onClose={() => setComfortOpen(false)}
         language={currentLanguage}
+        onLanguageChange={handleLanguageChange}
         settings={comfortSettings}
         onUpdateSettings={setComfortSettings}
         onResetComfort={() => setComfortSettings(DEFAULT_COMFORT_SETTINGS)}
@@ -229,8 +394,10 @@ export default function App() {
           <HomeView
             currentLanguage={currentLanguage}
             onPageChange={handlePageChange}
+            onLanguageChange={handleLanguageChange}
             onSelectPatient={handleSelectPatientById}
             onOpenComfortMode={() => setComfortOpen(true)}
+            onOpenCompanion={() => setCompanionOpen(true)}
             onResetDemo={handleResetDemo}
           />
         )}
@@ -256,6 +423,9 @@ export default function App() {
             completedTasks={completedTasks}
             onToggleTask={handleToggleTask}
             onPageChange={handlePageChange}
+            complexity={comfortSettings.explanationComplexity}
+            aiConsentGranted={aiConsentGranted}
+            onAcceptAiConsent={() => setAiConsentGranted(true)}
           />
         )}
 
@@ -263,6 +433,9 @@ export default function App() {
           <ClarityView
             currentLanguage={currentLanguage}
             onPageChange={handlePageChange}
+            complexity={comfortSettings.explanationComplexity}
+            aiConsentGranted={aiConsentGranted}
+            onAcceptAiConsent={() => setAiConsentGranted(true)}
           />
         )}
 
@@ -271,7 +444,13 @@ export default function App() {
             currentLanguage={currentLanguage}
             appointment={selectedAppointment}
             sharing={careCircleSharing}
-            onUpdateSharing={setCareCircleSharing}
+            onUpdateSharing={(next) => {
+              setCareCircleSharing(next);
+              if (next.consentGranted) {
+                setShowcaseProgress((prev) => ({ ...prev, caregiverHandoff: true }));
+              }
+              setSessionActionsCount((c) => c + 1);
+            }}
             completedTasks={completedTasks}
             onPageChange={handlePageChange}
           />
@@ -337,9 +516,136 @@ export default function App() {
             onPageChange={handlePageChange}
           />
         )}
+        {currentPage === 'intelligence' && (
+          <IntelligenceView
+            currentLanguage={currentLanguage}
+            profile={intelligenceProfile}
+            onUpdateProfile={(next) => {
+              setIntelligenceProfile(next);
+              if (next.completedOnboarding) {
+                setShowcaseProgress((prev) => ({ ...prev, carePathway: true }));
+              }
+              setSessionActionsCount((c) => c + 1);
+            }}
+            onLanguageChange={handleLanguageChange}
+            onApplyComfortPatch={(patch) => {
+              setComfortSettings((prev) => ({ ...prev, ...patch }));
+              setShowcaseProgress((prev) => ({ ...prev, languageAndAccessibility: true }));
+            }}
+            onPageChange={handlePageChange}
+            onResetProfile={() => setIntelligenceProfile(DEFAULT_INTELLIGENCE_PROFILE)}
+          />
+        )}
+
+        {currentPage === 'voicebridge' && (
+          <VoiceBridgeView
+            currentLanguage={currentLanguage}
+            appointment={selectedAppointment}
+            onLanguageChange={handleLanguageChange}
+            onPageChange={handlePageChange}
+            reduceMotion={effectiveMotionMode === 'none'}
+          />
+        )}
+
+        {currentPage === 'sense' && (
+          <SenseView
+            currentLanguage={currentLanguage}
+            onPageChange={handlePageChange}
+            onSenseCompleted={() => {
+              setShowcaseProgress((prev) => ({ ...prev, senseUnderstanding: true }));
+              setSessionActionsCount((c) => c + 1);
+            }}
+          />
+        )}
+
+        {currentPage === 'carecompass' && (
+          <CareCompassView
+            currentLanguage={currentLanguage}
+            appointment={selectedAppointment}
+            onPageChange={handlePageChange}
+            onChecklistInteracted={() => {
+              setShowcaseProgress((prev) => ({ ...prev, careCompassChecklist: true }));
+              setSessionActionsCount((c) => c + 1);
+            }}
+          />
+        )}
+
+        {currentPage === 'careflow' && (
+          <CareFlowView
+            currentLanguage={currentLanguage}
+            onPageChange={handlePageChange}
+            onDecisionCompleted={() => {
+              setShowcaseProgress((prev) => ({ ...prev, careFlowProblem: true }));
+              setSessionActionsCount((c) => c + 1);
+            }}
+          />
+        )}
+
+        {currentPage === 'accessibility-lab' && (
+          <AccessibilityLabView
+            currentLanguage={currentLanguage}
+            currentComfort={comfortSettings}
+            onApplyComfort={(next) => {
+              setComfortSettings(next);
+              setShowcaseProgress((prev) => ({ ...prev, languageAndAccessibility: true }));
+              setSessionActionsCount((c) => c + 1);
+            }}
+            onLanguageChange={handleLanguageChange}
+            onPageChange={handlePageChange}
+          />
+        )}
+
+        {currentPage === 'insights' && (
+          <InsightsView
+            currentLanguage={currentLanguage}
+            onPageChange={handlePageChange}
+            sessionActionsCount={sessionActionsCount}
+          />
+        )}
+
+        {currentPage === 'showcase' && (
+          <ShowcaseView
+            currentLanguage={currentLanguage}
+            progress={showcaseProgress}
+            onToggleMilestone={(key) =>
+              setShowcaseProgress((prev) => ({ ...prev, [key]: !prev[key] }))
+            }
+            onResetShowcase={() => setShowcaseProgress(DEFAULT_SHOWCASE_PROGRESS)}
+            onPageChange={handlePageChange}
+            onOpenComfortMode={() => setComfortOpen(true)}
+          />
+        )}
+
+        {currentPage === 'stories' && (
+          <CareStoriesView
+            currentLanguage={currentLanguage}
+            onLanguageChange={handleLanguageChange}
+            onApplyComfortPatch={(patch) => {
+              setComfortSettings((prev) => ({ ...prev, ...patch }));
+              setShowcaseProgress((prev) => ({ ...prev, languageAndAccessibility: true }));
+            }}
+            onPageChange={handlePageChange}
+          />
+        )}
       </main>
 
-      {/* Floating Minimal CORE Companion Assistant */}
+      {/* Offline Status Toast (shows only when browser reports offline) */}
+      <OfflineIndicator language={currentLanguage} />
+
+      {/* Universal CORE Smart Search Overlay */}
+      <SmartSearchModal
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        language={currentLanguage}
+        complexity={comfortSettings.explanationComplexity}
+        aiConsentGranted={aiConsentGranted}
+        onAcceptAiConsent={() => setAiConsentGranted(true)}
+        onPageChange={handlePageChange}
+        onLanguageChange={handleLanguageChange}
+        onOpenSettings={() => setComfortOpen(true)}
+      />
+
+      {/* Floating Rosewater CORE AI Companion Assistant */}
       <CoreCompanion
         language={currentLanguage}
         currentPage={currentPage}
@@ -347,8 +653,12 @@ export default function App() {
         onToggleOpen={setCompanionOpen}
         onPageChange={handlePageChange}
         onOpenComfortMode={() => setComfortOpen(true)}
-        reduceMotion={comfortSettings.reduceMotion}
+        onOpenSearch={() => setSearchOpen(true)}
+        comfortSettings={comfortSettings}
+        reduceMotion={effectiveMotionMode === 'none'}
         resetSignal={demoResetSignal}
+        aiConsentGranted={aiConsentGranted}
+        onAcceptAiConsent={() => setAiConsentGranted(true)}
       />
 
       {/* Footer */}

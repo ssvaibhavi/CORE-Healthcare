@@ -21,6 +21,29 @@ class SpeechController {
     return [];
   }
 
+  public getVoiceAvailability(lang: Language): {
+    speechSupported: boolean;
+    nativeVoiceAvailable: boolean;
+    voiceName?: string;
+  } {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return { speechSupported: false, nativeVoiceAvailable: false };
+    }
+    const voices = window.speechSynthesis.getVoices();
+    const match =
+      lang === 'kn'
+        ? voices.find((v) => v.lang.toLowerCase().startsWith('kn') || v.name.toLowerCase().includes('kannada'))
+        : lang === 'te'
+        ? voices.find((v) => v.lang.toLowerCase().startsWith('te') || v.name.toLowerCase().includes('telugu'))
+        : voices.find((v) => v.lang.toLowerCase().startsWith('en'));
+
+    return {
+      speechSupported: true,
+      nativeVoiceAvailable: Boolean(match),
+      voiceName: match?.name,
+    };
+  }
+
   // Play a soft reassuring hospital chime before speech
   public playReassuringChime(): void {
     try {

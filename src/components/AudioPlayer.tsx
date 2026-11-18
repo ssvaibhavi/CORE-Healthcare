@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Play, Pause, RotateCcw, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Play, Pause, RotateCcw, Info } from 'lucide-react';
 import { Language } from '../types';
 import { speechService } from '../utils/speech';
 
@@ -20,12 +20,24 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [isPaused, setIsPaused] = useState(false);
   const [currentSentence, setCurrentSentence] = useState<string>('');
   const [speechRate, setSpeechRate] = useState<number>(0.9);
+  const [voiceInfo, setVoiceInfo] = useState(() => speechService.getVoiceAvailability(language));
 
   useEffect(() => {
+    const refreshVoiceInfo = () => {
+      setVoiceInfo(speechService.getVoiceAvailability(language));
+    };
+    refreshVoiceInfo();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoiceInfo);
+      return () => {
+        window.speechSynthesis.removeEventListener?.('voiceschanged', refreshVoiceInfo);
+        speechService.stop();
+      };
+    }
     return () => {
       speechService.stop();
     };
-  }, []);
+  }, [language]);
 
   const handlePlay = () => {
     if (isPaused) {
@@ -172,7 +184,23 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           >
             {language === 'kn' ? 'ವೇಗ' : language === 'te' ? 'వేగం' : 'Speed'}:{' '}
             <span className="font-bold text-[#8F7242]">
-              {speechRate === 0.75 ? '0.75x (Slow)' : speechRate === 0.9 ? '0.9x (Comfortable)' : '1.0x (Normal)'}
+              {speechRate === 0.75
+                ? language === 'kn'
+                  ? '0.75x (ನಿಧಾನ)'
+                  : language === 'te'
+                  ? '0.75x (నెమ్మది)'
+                  : '0.75x (Slow)'
+                : speechRate === 0.9
+                ? language === 'kn'
+                  ? '0.9x (ಆರಾಮದಾಯಕ)'
+                  : language === 'te'
+                  ? '0.9x (సౌకర్యవంతం)'
+                  : '0.9x (Comfortable)'
+                : language === 'kn'
+                ? '1.0x (ಸಾಮಾನ್ಯ)'
+                : language === 'te'
+                ? '1.0x (సాధారణ)'
+                : '1.0x (Normal)'}
             </span>
           </button>
         </div>
@@ -192,6 +220,26 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Transparent Speech Support Fallback Notice */}
+      {(!voiceInfo.speechSupported || !voiceInfo.nativeVoiceAvailable) && (
+        <div className="mt-4 p-3 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs text-[#493C39]/85 flex items-start gap-2">
+          <Info className="w-4 h-4 text-[#8A6D3F] shrink-0 mt-0.5" />
+          <span>
+            {!voiceInfo.speechSupported
+              ? language === 'kn'
+                ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಓದುಗ (Speech Synthesis) ಲಭ್ಯವಿಲ್ಲ; ವಾಕ್ಯ-ವಾಕ್ಯದ ದೃಶ್ಯ ಹೈಲೈಟ್ ಮೂಲಕ ಓದಲು ಸಹಾಯ ಮಾಡಲಾಗುತ್ತದೆ.'
+                : language === 'te'
+                ? 'ఈ బ్రౌజర్‌లో వాయిస్ రీడర్ అందుబాటులో లేదు; వాక్యాల వారీగా స్క్రీన్ హైలైట్ చూపబడుతుంది.'
+                : 'Browser speech synthesis is unavailable on this device; synchronized visual sentence highlighting stays active.'
+              : language === 'kn'
+              ? 'ಈ ಸಾಧನದಲ್ಲಿ ಕನ್ನಡ ಧ್ವನಿ ಪ್ಯಾಕ್ ಇಲ್ಲದಿದ್ದರೆ, CORE ಪಠ್ಯ-ವಾಕ್ಯ ಹೈಲೈಟ್ ಮತ್ತು ನಿಧಾನಗತಿಯ ಪೇಸಿಂಗ್ ಮೂಲಕ ಮಾರ್ಗದರ್ಶನ ನೀಡುತ್ತದೆ.'
+              : language === 'te'
+              ? 'ఈ పరికరంలో తెలుగు వాయిస్ ప్యాక్ లేనట్లయితే, CORE దృశ్య వాక్య హైలైట్ మరియు మెల్లని పేసింగ్‌తో సహాయం చేస్తుంది.'
+              : 'No native English OS voice pack was detected on this browser; synchronized sentence highlighting remains active as an accessible fallback.'}
+          </span>
         </div>
       )}
     </div>

@@ -86,14 +86,25 @@ export const VoiceCallSimulator: React.FC<VoiceCallSimulatorProps> = ({
           <div className="w-16 h-16 rounded-full bg-[#BEA06D]/20 border border-[#BEA06D] mx-auto flex items-center justify-center mb-3">
             <PhoneCall className="w-8 h-8 text-[#BEA06D] animate-bounce" />
           </div>
-          <span className="text-xs uppercase tracking-widest text-[#BEA06D] font-semibold">
-            {language === 'kn' ? 'ಆಸ್ಪತ್ರೆಯ ಒಳಬರುವ ಧ್ವನಿ ಕರೆ' : language === 'te' ? 'హాస్పిటల్ ఇన్‌కమింగ్ కాల్' : 'Incoming Hospital IVR Call'}
+          <span className="inline-block mb-2 px-3 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/50 text-[10px] font-bold uppercase tracking-wider text-amber-200">
+            {language === 'kn'
+              ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಪೂರ್ವವೀಕ್ಷಣೆ · ನಿಜವಾದ ಫೋನ್ ಕರೆ ಅಲ್ಲ'
+              : language === 'te'
+              ? 'డెమో ప్రివ్యూ · నిజమైన ఫోన్ కాల్ కాదు'
+              : 'Demo Preview · No Real Phone Call Placed'}
+          </span>
+          <span className="text-xs uppercase tracking-widest text-[#BEA06D] font-semibold block">
+            {language === 'kn' ? 'ಆಸ್ಪತ್ರೆಯ ಒಳಬರುವ ಧ್ವನಿ ಕರೆ' : language === 'te' ? 'హాస్పిటల్ ఇన్‌కమింగ్ కాల్' : 'Simulated Incoming Hospital IVR'}
           </span>
           <h3 className="text-xl font-bold mt-1 text-white">
             {appointment.hospitalName}
           </h3>
           <p className="text-xs text-gray-300 mt-0.5">
-            Diagnostic & Radiology Coordinator Desk
+            {language === 'kn'
+              ? 'ರೇಡಿಯಾಲಜಿ ವಿಭಾಗದ IVR ಪ್ರಾತ್ಯಕ್ಷಿಕೆ'
+              : language === 'te'
+              ? 'రేడియాలజీ విభాగం IVR డెమో'
+              : 'Radiology IVR Flow Demonstration'}
           </p>
         </div>
 
@@ -164,10 +175,10 @@ export const VoiceCallSimulator: React.FC<VoiceCallSimulatorProps> = ({
             </h4>
             <p className="text-xs text-emerald-200 mt-1">
               {language === 'kn'
-                ? 'ಕೀಪ್ಯಾಡ್‌ನಲ್ಲಿ ೧ ಒತ್ತಿ ನೀವು ಯಶಸ್ವಿಯಾಗಿ ಖಚಿತಪಡಿಸಿದ್ದೀರಿ.'
+                ? 'ಕೀಪ್ಯಾಡ್ "1" ಈ ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಸೆಷನ್‌ನಲ್ಲಿ ಮಾತ್ರ ಉಳಿಸಲಾಗಿದೆ (ಯಾವುದೇ ಆಸ್ಪತ್ರೆ ಸರ್ವರ್‌ಗೆ ಕಳುಹಿಸಿಲ್ಲ).'
                 : language === 'te'
-                ? 'కీప్యాడ్‌లో 1 నొక్కి మీరు హాజరును నిర్ధారించారు.'
-                : 'Keypad response "1" received and recorded in hospital system.'}
+                ? 'కీప్యాడ్ "1" ఈ డెమో సెషన్‌లో మాత్రమే నమోదైంది (నిజమైన ఆసుపత్రి సర్వర్‌కు కనెక్ట్ కాలేదు).'
+                : 'Keypad "1" saved in this local demo session only (no external hospital server connected).'}
             </p>
           </div>
         )}

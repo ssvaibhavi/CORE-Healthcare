@@ -1,8 +1,9 @@
 import React from 'react';
-import { ASSETS } from '../assets/images';
+import { CaseStudyEditorialPlate } from './BotanicalMotifs';
+import { Reveal } from './Reveal';
 import { Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
-import { AlertCircle, CheckCircle, Volume2, ArrowRight, ShieldCheck, HeartHandshake } from 'lucide-react';
+import { AlertCircle, CheckCircle, Volume2, ArrowRight } from 'lucide-react';
 
 interface ScenarioSpotlightProps {
   language: Language;
@@ -18,36 +19,19 @@ export const ScenarioSpotlight: React.FC<ScenarioSpotlightProps> = ({
   const t = TRANSLATIONS[language];
 
   return (
-    <section className="my-16 bg-white border border-[#BEA06D]/30 rounded-3xl p-6 sm:p-10 shadow-sm overflow-hidden relative">
-      {/* Decorative botanical accent line */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#BEA06D]/40 via-[#E6C1C4] to-[#A2B29B]/40" />
+    <Reveal>
+      <section className="my-16 bg-white border border-[#BEA06D]/35 rounded-3xl p-6 sm:p-10 shadow-xs overflow-hidden relative">
+        {/* Decorative Rosewater & champagne hairline */}
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#BEA06D]/45 via-[#C88F98] to-[#A2B29B]/45" />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-        {/* Left Column: Portrait & Reality */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="relative rounded-2xl overflow-hidden border-2 border-[#BEA06D]/40 shadow-md aspect-[4/3] bg-[#FCF9F5]">
-            <img
-              src={ASSETS.patientPortrait}
-              alt="Elderly rural patient"
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute bottom-3 left-3 right-3 bg-white/95 backdrop-blur-sm rounded-xl p-3 border border-[#BEA06D]/30 shadow-sm">
-              <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider block">
-                {language === 'kn' ? 'ನೈಜ ರೋಗಿ ಸನ್ನಿವೇಶ' : language === 'te' ? 'నిజ జీవిత రోగి కేస్ స్టడీ' : 'Real-World Case Study'}
-              </span>
-              <p className="text-sm font-bold text-[#3C3330]">
-                {language === 'kn' ? 'ಬಸಪ್ಪ ಗೌಡ (೬೦ ವರ್ಷ), ಚಿತ್ರದುರ್ಗ' : language === 'te' ? 'వెంకటప్ప నాయుడు (60 ఏళ్ళు), అనంతపురం' : 'Basappa Gowda (60 Years), Chitradurga'}
-              </p>
-              <p className="text-xs text-[#3C3330]/80">
-                {language === 'kn' ? 'ಹೊಟ್ಟೆಯ ಕಾಂಟ್ರಾಸ್ಟ್ ಸಿಟಿ ಸ್ಕ್ಯಾನ್' : language === 'te' ? 'పొట్ట కాంట్రాస్ట్ సిటి స్కాన్' : 'Abdominal Contrast CT Scan'}
-              </p>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          {/* Left Column: Image-Free Editorial Folio Plate */}
+          <div className="lg:col-span-5">
+            <CaseStudyEditorialPlate language={language} />
           </div>
-        </div>
 
-        {/* Right Column: Contrast Between Traditional Failure & CORE Solution */}
-        <div className="lg:col-span-7 space-y-6">
+          {/* Right Column: Contrast Between Traditional Failure & CORE Solution */}
+          <div className="lg:col-span-7 space-y-6">
           <div>
             <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block mb-1">
               {t.hero.scenarioPill}
@@ -108,7 +92,8 @@ export const ScenarioSpotlight: React.FC<ScenarioSpotlightProps> = ({
             </button>
           </div>
         </div>
-      </div>
-    </section>
+        </div>
+      </section>
+    </Reveal>
   );
 };

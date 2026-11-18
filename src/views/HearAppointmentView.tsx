@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { ASSETS } from '../assets/images';
+import { CoreMonogramMark } from '../components/BotanicalMotifs';
 import { Appointment, Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { AudioPlayer } from '../components/AudioPlayer';
 import { CareJourneyTimeline } from '../components/CareJourneyTimeline';
+import { Reveal, WordReveal } from '../components/Reveal';
 import {
   Calendar,
   Clock,
@@ -84,20 +85,23 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10">
       {/* Header & Verification Bar */}
-      <div className="text-center max-w-3xl mx-auto space-y-3">
-        <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-          {currentLanguage === 'kn' ? 'ಧ್ವನಿ ಆಧಾರಿತ ವಿವರಗಳು' : currentLanguage === 'te' ? 'వాయిస్ ఆధారిత వివరాలు' : 'Voice-First Information'}
-        </span>
-        <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
-          {t.appointment.title}
-        </h1>
-        <p className="text-sm sm:text-base text-[#3C3330]/80">
-          {t.appointment.subtitle}
-        </p>
-      </div>
+      <Reveal>
+        <div className="text-center max-w-3xl mx-auto space-y-3">
+          <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+            {currentLanguage === 'kn' ? 'ಧ್ವನಿ ಆಧಾರಿತ ವಿವರಗಳು' : currentLanguage === 'te' ? 'వాయిస్ ఆధారిత వివరాలు' : 'Voice-First Information'}
+          </span>
+          <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
+            <WordReveal text={t.appointment.title} />
+          </h1>
+          <p className="text-sm sm:text-base text-[#3C3330]/80">
+            {t.appointment.subtitle}
+          </p>
+        </div>
+      </Reveal>
 
       {/* Simplified Patient Switcher / Verification Box */}
-      <div className="bg-white border border-[#BEA06D]/30 rounded-3xl p-5 sm:p-7 shadow-sm">
+      <Reveal delay={70}>
+        <div className="bg-white border border-[#BEA06D]/30 rounded-3xl p-5 sm:p-7 shadow-sm">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="w-full sm:w-auto">
             <span className="text-xs font-semibold text-[#8F7242] uppercase tracking-wider block">
@@ -128,21 +132,16 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
             ))}
           </div>
         </div>
-      </div>
+        </div>
+      </Reveal>
 
       {/* Main Appointment Card */}
-      <div className="bg-white border-2 border-[#BEA06D]/40 rounded-3xl shadow-lg overflow-hidden transition-all">
+      <Reveal delay={120} variant="bloom">
+        <div className="bg-white border-2 border-[#BEA06D]/40 rounded-3xl shadow-lg overflow-hidden transition-all">
         {/* Card Header Strip with Gold Accents */}
         <div className="bg-[#FCF9F5] border-b border-[#BEA06D]/30 p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-[#BEA06D] shadow-sm bg-white shrink-0">
-              <img
-                src={ASSETS.logoEmblem}
-                alt="CORE"
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            </div>
+            <CoreMonogramMark size="md" />
             <div>
               <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
                 {t.appointment.detailsTitle}
@@ -310,10 +309,12 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      </Reveal>
 
       {/* Helpful Caregiver and Assistance Info */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+      <Reveal delay={140}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div className="p-5 bg-white border border-[#BEA06D]/30 rounded-2xl flex items-start gap-4">
           <HeartHandshake className="w-8 h-8 text-[#BEA06D] shrink-0 mt-1" />
           <div className="space-y-1">
@@ -356,66 +357,72 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
             {t.nav.getHelp} →
           </button>
         </div>
-      </div>
+        </div>
+      </Reveal>
 
       {/* Quick Patient Toolkit Shortcuts */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <button
-          type="button"
-          onClick={() => onPageChange('clarity')}
-          className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
-        >
-          <BookOpen className="w-6 h-6 text-[#4A6347] shrink-0" />
-          <div>
-            <span className="text-sm font-bold text-[#3C3330] block">
-              {currentLanguage === 'kn' ? 'ಸರಳವಾಗಿ ವಿವರಿಸಿ' : currentLanguage === 'te' ? 'సులభంగా వివరించండి' : 'Explain It Simply'}
-            </span>
-            <span className="text-xs text-[#3C3330]/75">
-              {currentLanguage === 'kn' ? 'ಸೂಚನೆಗಳ ಸುಲಭ ಅರ್ಥ ಕೇಳಿ' : currentLanguage === 'te' ? 'సూచనలను సులభంగా వినండి' : 'Hear hospital terms clearly'}
-            </span>
-          </div>
-        </button>
+      <Reveal delay={160}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <button
+            type="button"
+            onClick={() => onPageChange('clarity')}
+            className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
+          >
+            <BookOpen className="w-6 h-6 text-[#4A6347] shrink-0" />
+            <div>
+              <span className="text-sm font-bold text-[#3C3330] block">
+                {currentLanguage === 'kn' ? 'ಸರಳವಾಗಿ ವಿವರಿಸಿ' : currentLanguage === 'te' ? 'సులభంగా వివరించండి' : 'Explain It Simply'}
+              </span>
+              <span className="text-xs text-[#3C3330]/75">
+                {currentLanguage === 'kn' ? 'ಸೂಚನೆಗಳ ಸುಲಭ ಅರ್ಥ ಕೇಳಿ' : currentLanguage === 'te' ? 'సూచనలను సులభంగా వినండి' : 'Hear hospital terms clearly'}
+              </span>
+            </div>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => onPageChange('passport')}
-          className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
-        >
-          <FileCheck2 className="w-6 h-6 text-[#BEA06D] shrink-0" />
-          <div>
-            <span className="text-sm font-bold text-[#3C3330] block">
-              {currentLanguage === 'kn' ? 'ನನ್ನ ವಿಸಿಟ್ ಪಾಸ್‌ಪೋರ್ಟ್' : currentLanguage === 'te' ? 'నా విజిట్ పాస్‌పోర్ట్' : 'My Visit Passport'}
-            </span>
-            <span className="text-xs text-[#3C3330]/75">
-              {currentLanguage === 'kn' ? 'ಪ್ರಿಂಟ್ / PDF ಸಿದ್ಧತಾ ಕಾರ್ಡ್' : currentLanguage === 'te' ? 'ప్రింట్ / PDF కార్డు పొందండి' : 'Print or save preparation card'}
-            </span>
-          </div>
-        </button>
+          <button
+            type="button"
+            onClick={() => onPageChange('passport')}
+            className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
+          >
+            <FileCheck2 className="w-6 h-6 text-[#BEA06D] shrink-0" />
+            <div>
+              <span className="text-sm font-bold text-[#3C3330] block">
+                {currentLanguage === 'kn' ? 'ನನ್ನ ವಿಸಿಟ್ ಪಾಸ್‌ಪೋರ್ಟ್' : currentLanguage === 'te' ? 'నా విజిట్ పాస్‌పోర్ట్' : 'My Visit Passport'}
+              </span>
+              <span className="text-xs text-[#3C3330]/75">
+                {currentLanguage === 'kn' ? 'ಪ್ರಿಂಟ್ / PDF ಸಿದ್ಧತಾ ಕಾರ್ಡ್' : currentLanguage === 'te' ? 'ప్రింట్ / PDF కార్డు పొందండి' : 'Print or save preparation card'}
+              </span>
+            </div>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => onPageChange('carecircle')}
-          className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
-        >
-          <Users className="w-6 h-6 text-[#C98897] shrink-0" />
-          <div>
-            <span className="text-sm font-bold text-[#3C3330] block">
-              CareCircle
-            </span>
-            <span className="text-xs text-[#3C3330]/75">
-              {currentLanguage === 'kn' ? 'ಸಮ್ಮತಿ ಆಧಾರಿತ ಕುಟುಂಬ ನೆರವು' : currentLanguage === 'te' ? 'అనుమతితో కుటుంబ సహాయం' : 'Consent-based family sharing'}
-            </span>
-          </div>
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => onPageChange('carecircle')}
+            className="p-4 bg-white border border-[#BEA06D]/35 hover:border-[#BEA06D] rounded-2xl text-left flex items-center gap-3 transition-all cursor-pointer botanical-card-hover"
+          >
+            <Users className="w-6 h-6 text-[#C98897] shrink-0" />
+            <div>
+              <span className="text-sm font-bold text-[#3C3330] block">
+                CareCircle
+              </span>
+              <span className="text-xs text-[#3C3330]/75">
+                {currentLanguage === 'kn' ? 'ಸಮ್ಮತಿ ಆಧಾರಿತ ಕುಟುಂಬ ನೆರವು' : currentLanguage === 'te' ? 'అనుమతితో కుటుంబ సహాయం' : 'Consent-based family sharing'}
+              </span>
+            </div>
+          </button>
+        </div>
+      </Reveal>
 
       {/* Interactive 3-Stage Care Journey Timeline */}
-      <CareJourneyTimeline
-        language={currentLanguage}
-        appointment={appointment}
-        completedTasks={completedTasks}
-        onToggleTask={onToggleTask}
-      />
+      <Reveal delay={180}>
+        <CareJourneyTimeline
+          language={currentLanguage}
+          appointment={appointment}
+          completedTasks={completedTasks}
+          onToggleTask={onToggleTask}
+          onPageChange={onPageChange}
+        />
+      </Reveal>
     </div>
   );
 };

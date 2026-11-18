@@ -53,7 +53,13 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = ({
             </div>
             <div>
               <h4 className="text-sm font-semibold text-white">Victoria Hospital Alerts</h4>
-              <span className="text-[10px] text-emerald-400">Official Healthcare Account ✓</span>
+              <span className="text-[10px] text-amber-300 font-semibold">
+                {language === 'kn'
+                  ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಪೂರ್ವವೀಕ್ಷಣೆ · ಹೊರಗಿನ ಸಂದೇಶವಿಲ್ಲ'
+                  : language === 'te'
+                  ? 'డెమో ప్రివ్యూ · బయటికి మెసేజ్ పంపబడదు'
+                  : 'Demonstration Preview · No External Message Sent'}
+              </span>
             </div>
           </div>
           <button
@@ -156,12 +162,12 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = ({
 
         {/* Footer */}
         <div className="p-3 bg-[#1F2C34] text-center border-t border-white/10">
-          <p className="text-[10px] text-gray-400">
+          <p className="text-[10px] text-gray-300">
             {language === 'kn'
-              ? 'ಆಸ್ಪತ್ರೆಯ ವಾಟ್ಸಾಪ್ ನೋಟಿಫಿಕೇಶನ್ ಪ್ರಾತ್ಯಕ್ಷಿಕೆ'
+              ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಮಾತ್ರ: ನೈಜ ರವಾನೆಗೆ Meta WhatsApp Business API ಮತ್ತು ಆಸ್ಪತ್ರೆ HIS ಅಗತ್ಯವಿದೆ.'
               : language === 'te'
-              ? 'హాస్పిటల్ వాట్సాప్ నోటిఫికేషన్ డెమో'
-              : 'Simulated WhatsApp notification preview'}
+              ? 'డెమో మాత్రమే: నిజమైన మెసేజ్ల కోసం WhatsApp Business API మరియు ఆసుపత్రి HIS అవసరం.'
+              : 'Demo Preview Only: Live delivery requires Meta WhatsApp Business API + hospital opt-in integration.'}
           </p>
         </div>
       </div>

@@ -5,13 +5,13 @@
   :root {
     --bg-ivory: #FCF9F5;
     --gold-champagne: #BEA06D;
-    --gold-dark: #8F7242;
+    --gold-dark: #8A6D3F;
     --blush-pink: #E6C1C4;
-    --rose-muted: #C98897;
+    --rose-muted: #C88F98;
     --sage-green: #A2B29B;
     --sage-dark: #4A6347;
-    --espresso-dark: #3C3330;
-    --espresso-deep: #211B19;
+    --espresso-dark: #493C39;
+    --espresso-deep: #322826;
     --surface-white: #FFFFFF;
   }
 
@@ -50,10 +50,20 @@
   font-family: 'Noto Sans Telugu', 'Plus Jakarta Sans', sans-serif;
 }
 
-/* Botanical fine border pattern */
+/* Rosewater Editorial Hairlines & Ornamental Frames */
 .gold-divider {
-  background: linear-gradient(90deg, transparent 0%, #BEA06D 30%, #BEA06D 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, #BEA06D 25%, #C88F98 50%, #BEA06D 75%, transparent 100%);
   height: 1px;
+}
+
+.rosewater-divider {
+  background: linear-gradient(90deg, transparent 0%, #E6C1C4 30%, #BEA06D 50%, #A2B29B 70%, transparent 100%);
+  height: 1px;
+}
+
+.editorial-frame {
+  border: 1px solid rgba(190, 160, 109, 0.38);
+  box-shadow: 0 12px 32px -16px rgba(73, 60, 57, 0.08);
 }
 
 /* Audio wave pulse animation */
@@ -63,7 +73,7 @@
 }
 
 .wave-bar {
-  animation: soundwave 1.2s ease-in-out infinite;
+  animation: soundwave 1.4s ease-in-out infinite;
 }
 
 .wave-bar:nth-child(2) { animation-delay: 0.2s; }
@@ -71,11 +81,11 @@
 .wave-bar:nth-child(4) { animation-delay: 0.1s; }
 .wave-bar:nth-child(5) { animation-delay: 0.3s; }
 
-/* Subtle botanical & editorial microinteractions */
+/* Slow Botanical Reveal Animations (800ms - 1100ms gentle opening) */
 @keyframes softFadeUp {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(18px);
   }
   to {
     opacity: 1;
@@ -84,25 +94,142 @@
 }
 
 .soft-fade-up {
-  animation: softFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: softFadeUp 0.88s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes softBloom {
+  from {
+    opacity: 0;
+    transform: scale(0.965) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.soft-bloom {
+  animation: softBloom 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes modalFadeScale {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-soft-enter {
+  animation: modalFadeScale 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes wordBloom {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.word-bloom {
+  display: inline-block;
+  animation: wordBloom 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Subtle blush-and-ivory ambient drift for hero & editorial resting sections */
+@keyframes ivoryBlushDrift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.living-ivory-ambient {
+  background: linear-gradient(120deg, #FCF9F5 0%, #FDF6F6 35%, #FCF9F5 65%, #F8F4EE 100%);
+  background-size: 200% 200%;
+  animation: ivoryBlushDrift 18s ease-in-out infinite;
 }
 
 @keyframes gentleCheckPop {
-  0% { transform: scale(0.85); }
-  60% { transform: scale(1.08); }
+  0% { transform: scale(0.88); }
+  60% { transform: scale(1.06); }
   100% { transform: scale(1); }
 }
 
 .check-pop {
-  animation: gentleCheckPop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: gentleCheckPop 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .botanical-card-hover {
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.35s ease,
+    box-shadow 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.35s ease;
 }
 
 .botanical-card-hover:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 16px 34px -16px rgba(73, 60, 57, 0.13);
+}
+
+/* Graceful card expansion & tab transitions */
+.graceful-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.55s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.45s ease;
+  opacity: 0;
+}
+
+.graceful-expand[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.graceful-expand > div {
+  overflow: hidden;
+}
+
+/* Refined accessible focus rings */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #BEA06D;
+  outline-offset: 2px;
+}
+
+/* Gentle skeleton loading shimmer for contextual transitions */
+@keyframes ivoryShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-ivory {
+  background: linear-gradient(90deg, #F5EFE6 25%, #FCF9F5 50%, #F5EFE6 75%);
+  background-size: 200% 100%;
+  animation: ivoryShimmer 1.6s ease-in-out infinite;
+}
+
+/* Soft VoiceBridge ring pulse */
+@keyframes voiceRing {
+  0% { transform: scale(0.95); opacity: 0.65; }
+  70% { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+.voice-ring {
+  animation: voiceRing 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
 }
 
 /* Larger Interactive Buttons Mode */
@@ -121,7 +248,22 @@
   padding-right: 1.5rem;
 }
 
-/* Reduced Motion Accessibility Mode (User toggle OR OS preference) */
+/* Gentle Motion Mode: calm opacity fades without large displacements */
+.gentle-motion .word-bloom,
+.gentle-motion .living-ivory-ambient {
+  animation: none !important;
+}
+
+.gentle-motion .botanical-card-hover:hover {
+  transform: translateY(-1px);
+}
+
+.gentle-motion .soft-fade-up,
+.gentle-motion .soft-bloom {
+  animation-duration: 0.4s !important;
+}
+
+/* No Motion / Reduced Motion Accessibility Mode (User toggle OR OS preference) */
 .reduce-motion *,
 .reduce-motion *::before,
 .reduce-motion *::after {
@@ -152,7 +294,7 @@
 
   body {
     background: #FFFFFF !important;
-    color: #211B19 !important;
+    color: #322826 !important;
   }
 
   .print-passport-only {

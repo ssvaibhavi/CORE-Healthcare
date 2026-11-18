@@ -3,20 +3,21 @@ import { Appointment, Language, PageView } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { VoiceCallSimulator } from '../components/VoiceCallSimulator';
 import { WhatsAppSimulator } from '../components/WhatsAppSimulator';
+import { Reveal, WordReveal } from '../components/Reveal';
+import { downloadIcsReminder } from '../utils/calendarExport';
 import {
   Bell,
   PhoneCall,
   MessageSquare,
   Smartphone,
   Users,
-  Shield,
   CheckCircle2,
-  Play,
   Clock,
-  Sparkles,
   Info,
   Save,
-  UserCheck
+  CalendarPlus,
+  BellRing,
+  ServerCog
 } from 'lucide-react';
 
 interface RemindersViewProps {
@@ -39,6 +40,7 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
   const [showWhatsAppSimulator, setShowWhatsAppSimulator] = useState(false);
   const [showSmsModal, setShowSmsModal] = useState(false);
   const [savedSuccessNotice, setSavedSuccessNotice] = useState(false);
+  const [localToolNotice, setLocalToolNotice] = useState<string | null>(null);
 
   // Local state for preferences
   const [preferences, setPreferences] = useState(appointment.reminderPreferences);
@@ -77,7 +79,82 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
     setSavedSuccessNotice(true);
     setTimeout(() => {
       setSavedSuccessNotice(false);
-    }, 4000);
+    }, 4500);
+  };
+
+  const handleDownloadIcs = () => {
+    downloadIcsReminder({
+      title: `CORE Visit Reminder: ${appointment.testName}`,
+      dateYmd: appointment.date,
+      timeStr: appointment.time,
+      location: `${appointment.hospitalName} — ${appointment.roomNumber}`,
+      description: 'Exported locally from CORE Reminders (demonstration appointment). Confirm final timings directly with your hospital.',
+    });
+    setLocalToolNotice(
+      currentLanguage === 'kn'
+        ? 'ನಿಮ್ಮ ಸಾಧನಕ್ಕೆ .ics ಕ್ಯಾಲೆಂಡರ್ ಜ್ಞಾಪನೆ ಫೈಲ್ ಡೌನ್‌ಲೋಡ್ ಆಗಿದೆ.'
+        : currentLanguage === 'te'
+        ? 'మీ పరికరానికి .ics క్యಾಲెండర్ రిమైండర్ ఫైల్ డౌన్‌లోడ్ చేయబడింది.'
+        : 'Downloaded .ics calendar file locally to your device.'
+    );
+    setTimeout(() => setLocalToolNotice(null), 4500);
+  };
+
+  const handleBrowserNotification = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setLocalToolNotice(
+        currentLanguage === 'kn'
+          ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಸ್ಥಳೀಯ ಅಧಿಸೂಚನೆ ಲಭ್ಯವಿಲ್ಲ; ದಯವಿಟ್ಟು .ics ಕ್ಯಾಲೆಂಡರ್ ಡೌನ್‌ಲೋಡ್ ಬಳಸಿ.'
+          : currentLanguage === 'te'
+          ? 'ఈ బ్రౌజర్‌లో నోటిఫికేషన్‌లు అందుబాటులో లేవు; .ics క్యಾಲెండర్ డౌన్‌లోడ్ వాడండి.'
+          : 'Browser Notification API is unavailable in this environment; please use the .ics Calendar download.'
+      );
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      new Notification('CORE Local Visit Reminder', {
+        body: `${appointment.testName} · ${appointment.date} at ${appointment.time}`,
+      });
+      setLocalToolNotice(
+        currentLanguage === 'kn'
+          ? 'ಸ್ಥಳೀಯ ಬ್ರೌಸರ್ ಜ್ಞಾಪನೆಯನ್ನು ತೋರಿಸಲಾಗಿದೆ (ಬಾಹ್ಯ SMS ಕಳುಹಿಸಿಲ್ಲ).'
+          : currentLanguage === 'te'
+          ? 'స్థానిక బ్రౌజర్ నోటిఫికేషన్ చూపబడింది (బయటికి SMS పంపలేదు).'
+          : 'Local browser reminder displayed (no external carrier message sent).'
+      );
+    } else if (Notification.permission !== 'denied') {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        new Notification('CORE Local Visit Reminder', {
+          body: `${appointment.testName} · ${appointment.date} at ${appointment.time}`,
+        });
+        setLocalToolNotice(
+          currentLanguage === 'kn'
+            ? 'ಸ್ಥಳೀಯ ಬ್ರೌಸರ್ ಜ್ಞಾಪನೆ ಸಕ್ರಿಯವಾಗಿದೆ.'
+            : currentLanguage === 'te'
+            ? 'స్థానిక బ్రౌజర్ రిమైండర్ చూపబడింది.'
+            : 'Local browser notification permitted and displayed.'
+        );
+      } else {
+        setLocalToolNotice(
+          currentLanguage === 'kn'
+            ? 'ಬ್ರೌಸರ್ ಅಧಿಸೂಚನೆ ಅನುಮತಿ ನೀಡಿಲ್ಲ; ದಯವಿಟ್ಟು .ics ಕ್ಯಾಲೆಂಡರ್ ಫೈಲ್ ಬಳಸಿ.'
+            : currentLanguage === 'te'
+            ? 'నోటిఫికేషన్ అనుమతి ఇవ్వలేదు; .ics క్యಾಲెండర్ ఫైల్ ఉపయోగించండి.'
+            : 'Notification permission declined; please use the working .ics Calendar Export instead.'
+        );
+      }
+    } else {
+      setLocalToolNotice(
+        currentLanguage === 'kn'
+          ? 'ಬ್ರೌಸರ್ ಅಧಿಸೂಚನೆ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ; .ics ಕ್ಯಾಲೆಂಡರ್ ಫೈಲ್ ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ.'
+          : currentLanguage === 'te'
+          ? 'బ్రౌజర్ నోటిఫికేషన్లు బ్లాక్ చేయబడ్డాయి; .ics క్యಾಲెండర్ డౌన్‌లోడ్ వాడండి.'
+          : 'Browser notifications are blocked in site settings; please use the .ics Calendar download.'
+      );
+    }
+    setTimeout(() => setLocalToolNotice(null), 5000);
   };
 
   // Plain Native SMS text for Basappa Gowda
@@ -94,94 +171,182 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10">
       {/* View Header */}
-      <div className="text-center max-w-3xl mx-auto space-y-3">
-        <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-          {currentLanguage === 'kn' ? 'ಸಕಾಲಿಕ ಜ್ಞಾಪನೆಗಳು' : currentLanguage === 'te' ? 'సమయానికి రిమైండర్లు' : 'Intelligent Reminders'}
-        </span>
-        <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#3C3330]">
-          {t.reminders.title}
-        </h1>
-        <p className="text-sm sm:text-base text-[#3C3330]/80">
-          {t.reminders.subtitle}
-        </p>
-      </div>
-
-      {/* Interactive Communication Simulator Strip (Live Interactive Demos) */}
-      <div className="bg-gradient-to-r from-[#FCF9F5] via-white to-[#FCF9F5] border-2 border-[#BEA06D]/40 rounded-3xl p-6 sm:p-8 shadow-md space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-              {t.reminders.simulatorTitle}
-            </span>
-            <p className="text-sm font-semibold text-[#3C3330]">
-              {currentLanguage === 'kn'
-                ? 'ಗ್ರಾಮೀಣ ರೋಗಿಗಳಿಗೆ ಸಂದೇಶಗಳು ಹೇಗೆ ತಲುಪುತ್ತವೆ ಎಂಬುದನ್ನು ಈಗಲೇ ಪರೀಕ್ಷಿಸಿ:'
-                : currentLanguage === 'te'
-                ? 'గ్రామీణ రోగులకు సందేశాలు ఎలా చేరుతాయో ఇప్పుడే ప్రత్యక్షంగా పరీక్షించండి:'
-                : 'Test how elderly patients experience multi-channel reminders in real life:'}
-            </p>
-          </div>
-          <span className="text-xs bg-[#A2B29B]/30 text-[#4A6347] font-semibold px-3 py-1 rounded-full border border-[#A2B29B]/40">
-            Interactive Test Hub
+      <Reveal>
+        <div className="text-center max-w-3xl mx-auto space-y-3">
+          <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+            {currentLanguage === 'kn' ? 'ಸಕಾಲಿಕ ಜ್ಞಾಪನೆಗಳು' : currentLanguage === 'te' ? 'సమయానికి రిమైండర్లు' : 'Reminders & Channel Previews'}
           </span>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#3C3330]">
+            <WordReveal text={t.reminders.title} />
+          </h1>
+          <p className="text-sm sm:text-base text-[#3C3330]/80">
+            {t.reminders.subtitle}
+          </p>
         </div>
+      </Reveal>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-          {/* Button 1: Simulate Phone Call */}
-          <button
-            onClick={() => setShowCallSimulator(true)}
-            className="p-4 rounded-2xl bg-white border-2 border-[#BEA06D] hover:bg-[#BEA06D]/15 active:scale-95 text-left transition-all shadow-xs flex flex-col justify-between cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5 text-[#8F7242] font-bold text-sm">
-              <PhoneCall className="w-5 h-5 text-emerald-600 animate-pulse" />
-              <span>{t.reminders.simulateCallBtn}</span>
+      {/* SECTION A: WORKING LOCAL DEVICE REMINDERS (.ics & Browser Notification) */}
+      <Reveal delay={70}>
+        <div className="bg-white border-2 border-[#A2B29B]/60 rounded-3xl p-6 sm:p-7 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#A2B29B]/30 pb-3.5">
+            <div>
+              <span className="text-[11px] font-bold text-[#4A6347] uppercase tracking-wider block">
+                {currentLanguage === 'kn'
+                  ? 'ಈಗಲೇ ಕಾರ್ಯನಿರ್ವಹಿಸುವ ಸ್ಥಳೀಯ ಸಾಧನಗಳು'
+                  : currentLanguage === 'te'
+                  ? 'ఇప్పుడే పనిచేసే స్థానిక సాధనాలు'
+                  : 'Working Local Browser Reminders'}
+              </span>
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-[#3C3330]">
+                {currentLanguage === 'kn'
+                  ? 'ಕ್ಯಾಲೆಂಡರ್ ಫೈಲ್ (.ics) ಮತ್ತು ಸ್ಥಳೀಯ ಬ್ರೌಸರ್ ಜ್ಞಾಪನೆ'
+                  : currentLanguage === 'te'
+                  ? 'క్యాలెండర్ ఫైల్ (.ics) మరియు స్థానిక బ్రౌజర్ రిమైండర్'
+                  : 'Save an Offline Calendar Reminder or Test Local Alert'}
+              </h2>
             </div>
-            <p className="text-xs text-[#3C3330]/75 mt-2">
-              {currentLanguage === 'kn'
-                ? 'ಫೋನ್ ಕರೆ ಬಂದು ಕನ್ನಡದಲ್ಲಿ ಓದಿ ಹೇಳುತ್ತದೆ. ಕೀಪ್ಯಾಡ್‌ನಲ್ಲಿ ೧ ಒತ್ತಿ ನೋಡಿ.'
-                : currentLanguage === 'te'
-                ? 'ఫోన్ కాల్ వచ్చి తెలుగులో మాట్లాడుతుంది. కీప్యాడ్‌లో 1 నొక్కండి.'
-                : 'Experience incoming spoken phone call with keypad response.'}
-            </p>
-          </button>
+            <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-[#A2B29B]/25 text-[#4A6347] border border-[#4A6347]/30 shrink-0">
+              {currentLanguage === 'kn' ? 'ಬಾಹ್ಯ ಸರ್ವರ್ ಅಗತ್ಯವಿಲ್ಲ' : currentLanguage === 'te' ? 'సెర్వర్ అవసరం లేదు' : 'Works Offline Locally'}
+            </span>
+          </div>
 
-          {/* Button 2: Simulate SMS */}
-          <button
-            onClick={() => setShowSmsModal(true)}
-            className="p-4 rounded-2xl bg-white border-2 border-[#BEA06D] hover:bg-[#BEA06D]/15 active:scale-95 text-left transition-all shadow-xs flex flex-col justify-between cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5 text-[#8F7242] font-bold text-sm">
-              <MessageSquare className="w-5 h-5 text-blue-600" />
-              <span>{t.reminders.simulateSmsBtn}</span>
-            </div>
-            <p className="text-xs text-[#3C3330]/75 mt-2">
-              {currentLanguage === 'kn'
-                ? 'ಸಾಮಾನ್ಯ ಫೋನ್‌ಗಳಲ್ಲಿ ಬರುವ ಕನ್ನಡ ಲಿಪಿಯ SMS ಸಂದೇಶ.'
-                : currentLanguage === 'te'
-                ? 'సాధారణ మొబైల్స్‌లో వచ్చే తెలుగు లిపి SMS.'
-                : 'Inspect clear text SMS in native script.'}
-            </p>
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleDownloadIcs}
+              className="py-3 px-5 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-xs cursor-pointer"
+            >
+              <CalendarPlus className="w-4 h-4" />
+              <span>
+                {currentLanguage === 'kn'
+                  ? 'ಕ್ಯಾಲೆಂಡರ್ ಫೈಲ್ (.ics) ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ'
+                  : currentLanguage === 'te'
+                  ? 'క్యాలెండర్ ఫైల్ (.ics) డౌన్‌లోడ్ చేయండి'
+                  : 'Download Calendar Reminder (.ics)'}
+              </span>
+            </button>
 
-          {/* Button 3: Simulate WhatsApp */}
-          <button
-            onClick={() => setShowWhatsAppSimulator(true)}
-            className="p-4 rounded-2xl bg-white border-2 border-[#BEA06D] hover:bg-[#BEA06D]/15 active:scale-95 text-left transition-all shadow-xs flex flex-col justify-between cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5 text-[#8F7242] font-bold text-sm">
-              <Smartphone className="w-5 h-5 text-emerald-600" />
-              <span>{t.reminders.simulateWhatsappBtn}</span>
+            <button
+              type="button"
+              onClick={() => void handleBrowserNotification()}
+              className="py-3 px-5 rounded-full bg-[#FCF9F5] hover:bg-[#BEA06D]/15 border border-[#BEA06D] text-[#8F7242] text-xs sm:text-sm font-bold inline-flex items-center gap-2 cursor-pointer"
+            >
+              <BellRing className="w-4 h-4" />
+              <span>
+                {currentLanguage === 'kn'
+                  ? 'ಬ್ರೌಸರ್ ಜ್ಞಾಪನೆ ಪರೀಕ್ಷಿಸಿ'
+                  : currentLanguage === 'te'
+                  ? 'బ్రౌజర్ నోటిఫికేషన్ పరీక్షించండి'
+                  : 'Trigger Local Browser Notification'}
+              </span>
+            </button>
+          </div>
+
+          {localToolNotice && (
+            <div className="p-3 rounded-2xl bg-[#A2B29B]/20 border border-[#4A6347]/50 text-xs sm:text-sm font-semibold text-[#4A6347] flex items-center gap-2 soft-fade-up">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{localToolNotice}</span>
             </div>
-            <p className="text-xs text-[#3C3330]/75 mt-2">
-              {currentLanguage === 'kn'
-                ? 'ದೊಡ್ಡ ಚಿತ್ರ ಕಾರ್ಡ್ ಹಾಗೂ ಧ್ವನಿ ಸಂದೇಶ (Voice Note).'
-                : currentLanguage === 'te'
-                ? 'పెద్ద ఫోటో కార్డు మరియు వాయిస్ మెసేజ్.'
-                : 'Inspect visual card with playable audio note.'}
-            </p>
-          </button>
+          )}
         </div>
-      </div>
+      </Reveal>
+
+      {/* SECTION B: DEMONSTRATION PREVIEW SIMULATORS (NO EXTERNAL MESSAGE SENT) */}
+      <Reveal delay={110}>
+        <div className="bg-gradient-to-r from-[#FCF9F5] via-white to-[#FCF9F5] border-2 border-[#BEA06D]/45 rounded-3xl p-6 sm:p-8 shadow-md space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
+                {t.reminders.simulatorTitle}
+              </span>
+              <p className="text-sm font-semibold text-[#3C3330]">
+                {currentLanguage === 'kn'
+                  ? 'ರೋಗಿಗಳಿಗೆ ಧ್ವನಿ ಕರೆ, SMS ಮತ್ತು ವಾಟ್ಸಾಪ್ ಹೇಗೆ ಕಾಣುತ್ತದೆ ಎಂಬುದನ್ನು ಇಲ್ಲಿ ಪರೀಕ್ಷಿಸಿ:'
+                  : currentLanguage === 'te'
+                  ? 'రోగులకు ఫోన్ కాల్, SMS మరియు వాట్సాప్ ఎలా కనిపిస్తాయో ఇక్కడ చూడండి:'
+                  : 'Interactive channel previews illustrating how elderly patients receive alerts:'}
+              </p>
+            </div>
+            <span className="text-xs bg-amber-50 text-amber-900 font-bold px-3.5 py-1.5 rounded-full border border-amber-300 shrink-0">
+              {currentLanguage === 'kn'
+                ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಪೂರ್ವವೀಕ್ಷಣೆ — ಹೊರಗಿನ ಸಂದೇಶ ಕಳುಹಿಸುವುದಿಲ್ಲ'
+                : currentLanguage === 'te'
+                ? 'డెమో ప్రివ్యూ — బయటికి మెసేజ్ పంపబడదు'
+                : 'Demonstration Preview — No External Message Sent'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            {/* Button 1: Simulate Phone Call */}
+            <button
+              type="button"
+              onClick={() => setShowCallSimulator(true)}
+              className="p-4 rounded-2xl bg-white border-2 border-[#BEA06D] hover:bg-[#BEA06D]/12 active:scale-[0.98] text-left transition-all shadow-xs flex flex-col justify-between cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 text-[#8F7242] font-bold text-sm">
+                <PhoneCall className="w-5 h-5 text-emerald-700" />
+                <span>{t.reminders.simulateCallBtn}</span>
+              </div>
+              <p className="text-xs text-[#3C3330]/75 mt-2">
+                {currentLanguage === 'kn'
+                  ? 'ಆನ್-ಸ್ಕ್ರೀನ್ ಧ್ವನಿ ಕರೆ ಪೂರ್ವವೀಕ್ಷಣೆ (ನಿಜವಾದ ಟೆಲಿಕಾಂ ಕರೆ ಅಲ್ಲ).'
+                  : currentLanguage === 'te'
+                  ? 'ఆన్-స్క్రీన్ వాయిస్ కాల్ డెమో (నిజమైన ఫోన్ కాల్ కాదు).'
+                  : 'On-screen spoken IVR preview with keypad "1/2" flow (demo only).'}
+              </p>
+            </button>
+
+            {/* Button 2: Simulate SMS */}
+            <button
+              type="button"
+              onClick={() => setShowSmsModal(true)}
+              className="p-4 rounded-2xl bg-white border-2 border-[#BEA06D] hover:bg-[#BEA06D]/12 active:scale-[0.98] text-left transition-all shadow-xs flex flex-col justify-between cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 text-[#8F7242] font-bold text-sm">
+                <MessageSquare className="w-5 h-5 text-blue-700" />
+                <span>{t.reminders.simulateSmsBtn}</span>
+              </div>
+              <p className="text-xs text-[#3C3330]/75 mt-2">
+                {currentLanguage === 'kn'
+                  ? 'ಕನ್ನಡ ಲಿಪಿಯ SMS ಸಂದೇಶದ ನಮೂನೆ ಪೂರ್ವವೀಕ್ಷಣೆ.'
+                  : currentLanguage === 'te'
+                  ? 'తెలుగు లిపి SMS సందేశ నమూనా ప్రివ్యూ.'
+                  : 'Inspect sample native-script SMS layout locally (not sent via carrier).'}
+              </p>
+            </button>
+
+            {/* Button 3: Simulate WhatsApp */}
+            <button
+              type="button"
+              onClick={() => setShowWhatsAppSimulator(true)}
+              className="p-4 rounded-2xl bg-white border-2 border-[#BEA06D] hover:bg-[#BEA06D]/12 active:scale-[0.98] text-left transition-all shadow-xs flex flex-col justify-between cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 text-[#8F7242] font-bold text-sm">
+                <Smartphone className="w-5 h-5 text-emerald-700" />
+                <span>{t.reminders.simulateWhatsappBtn}</span>
+              </div>
+              <p className="text-xs text-[#3C3330]/75 mt-2">
+                {currentLanguage === 'kn'
+                  ? 'ಚಿತ್ರ ಕಾರ್ಡ್ ಮತ್ತು ಧ್ವನಿ ಸಂದೇಶದ ಪೂರ್ವವೀಕ್ಷಣೆ.'
+                  : currentLanguage === 'te'
+                  ? 'చిత్ర కార్డు మరియు వాయిస్ మెసేజ్ ప్రివ్యూ.'
+                  : 'Inspect card + Web Speech audio note preview (demo only).'}
+              </p>
+            </button>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/30 flex items-start gap-2.5 text-xs text-[#3C3330]/85">
+            <ServerCog className="w-4 h-4 text-[#8F7242] shrink-0 mt-0.5" />
+            <span>
+              {currentLanguage === 'kn'
+                ? 'ಬಾಹ್ಯ ಸೇವಾ ಅಗತ್ಯತೆಗಳು: ನೈಜ ರೋಗಿಗಳಿಗೆ ಕರೆ, SMS ಮತ್ತು ವಾಟ್ಸಾಪ್ ಕಳುಹಿಸಲು SIP/PSTN ಧ್ವನಿ ಗೇಟ್‌ವೇ (Exotel/Twilio), TRAI DLT-ನೋಂದಾಯಿತ SMS ಪೂರೈಕೆದಾರ, Meta WhatsApp Business API ಮತ್ತು ಆಸ್ಪತ್ರೆ HIS ಅನುಮತಿ ಅಗತ್ಯವಿದೆ.'
+                : currentLanguage === 'te'
+                ? 'బాహ్య సేవల అవసరాలు: నిజమైన ఫోన్ కాల్స్, SMS మరియు వాట్సాప్ పంపడానికి Exotel/Twilio వాయిస్ గేట్‌వే, TRAI DLT SMS గేట్‌వే, WhatsApp Business API మరియు ఆసుపత్రి HIS అనుసంధానం అవసరం.'
+                : 'External Provider Requirements: Live delivery to patients’ phones requires a PSTN/SIP Voice IVR gateway (e.g., Exotel/Twilio), a TRAI DLT-registered SMS carrier, Meta WhatsApp Business API, and authenticated hospital HIS/FHIR scheduling integration.'}
+            </span>
+          </div>
+        </div>
+      </Reveal>
 
       {/* Main Settings Form */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -420,8 +585,13 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
               </button>
 
               {savedSuccessNotice && (
-                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-center text-xs font-semibold text-emerald-800 animate-in fade-in-50">
-                  ✓ {t.reminders.preferencesSavedMsg}
+                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-center text-xs font-semibold text-emerald-800 soft-fade-up">
+                  ✓{' '}
+                  {currentLanguage === 'kn'
+                    ? 'ಈ ಬ್ರೌಸರ್ ಸೆಷನ್‌ಗೆ ಮಾತ್ರ ಉಳಿಸಲಾಗಿದೆ (ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಸ್ಥಿತಿ).'
+                    : currentLanguage === 'te'
+                    ? 'ఈ బ్రౌజర్ సెషన్‌కు మాత్రమే సేవ్ చేయబడింది (డెమో మోడ్).'
+                    : 'Saved in this browser session only (demonstration state — no carrier gateway connected).'}
                 </div>
               )}
 
@@ -444,19 +614,35 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
       {/* SMS Modal Preview */}
       {showSmsModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border-2 border-[#BEA06D] space-y-4 animate-in zoom-in-95">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border-2 border-[#BEA06D] space-y-4 modal-soft-enter">
             <div className="flex items-center justify-between border-b pb-3">
               <div className="flex items-center gap-2 text-[#8F7242] font-bold text-sm">
                 <MessageSquare className="w-5 h-5" />
-                <span>Govt Hospital SMS</span>
+                <span>
+                  {currentLanguage === 'kn'
+                    ? 'SMS ನಮೂನೆ ಪೂರ್ವವೀಕ್ಷಣೆ'
+                    : currentLanguage === 'te'
+                    ? 'SMS నమూనా ప్రివ్యూ'
+                    : 'SMS Demonstration Preview'}
+                </span>
               </div>
               <button
+                type="button"
                 onClick={() => setShowSmsModal(false)}
-                className="text-gray-400 hover:text-black font-bold text-lg"
+                className="text-gray-400 hover:text-black font-bold text-lg cursor-pointer"
+                aria-label="Close SMS preview"
               >
                 ✕
               </button>
             </div>
+
+            <span className="block text-center text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-900">
+              {currentLanguage === 'kn'
+                ? 'ಪ್ರಾತ್ಯಕ್ಷಿಕೆ ಮಾತ್ರ — ನೆಟ್‌ವರ್ಕ್ ಮೂಲಕ ಕಳುಹಿಸಿಲ್ಲ'
+                : currentLanguage === 'te'
+                ? 'డెమో మాత్రమే — బయటికి పంపబడలేదు'
+                : 'Demo Preview — Not Sent Over Mobile Network'}
+            </span>
 
             <div className="p-4 bg-[#FCF9F5] rounded-2xl border border-gray-200 text-sm leading-relaxed text-[#3C3330]">
               {getSmsText()}
@@ -464,17 +650,18 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
 
             <div className="text-[11px] text-gray-500 text-center">
               {currentLanguage === 'kn'
-                ? 'ಕನ್ನಡ ಲಿಪಿಯಲ್ಲಿ ರವಾನೆಯಾಗುವ ಸಂದೇಶದಿಂದ ರೋಗಿ ಸ್ವತಂತ್ರವಾಗಿ ಓದಬಹುದು ಅಥವಾ ಪರಿಚಿತರಿಂದ ಓದಿಸಿಕೊಳ್ಳಬಹುದು.'
+                ? 'ನೈಜ ರವಾನೆಗೆ TRAI DLT-ನೋಂದಾಯಿತ SMS ಗೇಟ್‌ವೇ ಅಗತ್ಯವಿದೆ.'
                 : currentLanguage === 'te'
-                ? 'తెలుగు లిపిలో వచ్చే సందేశాన్ని రోగి స్వయంగా అర్థం చేసుకోవచ్చు.'
-                : 'Native script prevents decoding confusion.'}
+                ? 'నిజమైన SMS కోసం TRAI DLT గేట్‌వే అవసరం.'
+                : 'Native script layout preview. Live SMS dispatch requires a DLT-registered telecom gateway.'}
             </div>
 
             <button
+              type="button"
               onClick={() => setShowSmsModal(false)}
-              className="w-full py-2.5 bg-[#BEA06D] text-white rounded-xl font-bold text-xs"
+              className="w-full py-2.5 bg-[#BEA06D] text-white rounded-xl font-bold text-xs cursor-pointer"
             >
-              Close SMS
+              {currentLanguage === 'kn' ? 'SMS ಮುಚ್ಚಿ' : currentLanguage === 'te' ? 'SMS మూసివేయండి' : 'Close Preview'}
             </button>
           </div>
         </div>
