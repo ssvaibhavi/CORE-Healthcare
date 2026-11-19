@@ -44,7 +44,7 @@ export class AiClientError extends Error {
 
 async function postAiEndpoint<T>(url: string, body: Record<string, unknown>): Promise<T> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 45_000);
+  const timer = window.setTimeout(() => controller.abort(), 55_000);
 
   try {
     const res = await fetch(url, {
@@ -57,7 +57,7 @@ async function postAiEndpoint<T>(url: string, body: Record<string, unknown>): Pr
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json?.ok) {
       throw new AiClientError(
-        json?.message || 'Unable to reach CORE AI right now.',
+        json?.message || 'Unable to reach CORE AI right now. Please tap Retry in a few seconds.',
         json?.error || 'AI_REQUEST_FAILED',
         res.status
       );
@@ -68,19 +68,78 @@ async function postAiEndpoint<T>(url: string, body: Record<string, unknown>): Pr
     if (err instanceof AiClientError) throw err;
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new AiClientError(
-        'The AI request took too long. Please try again in a moment.',
+        'CORE AI took longer than expected to respond. Your question is still here — please tap Retry in a moment.',
         'AI_TIMEOUT',
         504
       );
     }
     throw new AiClientError(
-      'Network error while reaching CORE AI service.',
+      'Unable to connect to CORE AI right now. Please check your connection and tap Retry.',
       'AI_NETWORK_ERROR',
       503
     );
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+export function formatAiErrorMessage(err: unknown, language: Language): string {
+  const code = err instanceof AiClientError ? err.code : 'AI_NETWORK_ERROR';
+
+  if (code === 'AI_SERVICE_BUSY' || code === 'AI_NETWORK_ERROR') {
+    if (language === 'kn') {
+      return 'Google Gemini ಸೇವೆಯಲ್ಲಿ ಈಗ ತಾತ್ಕಾಲಿಕವಾಗಿ ಹೆಚ್ಚಿನ ದಟ್ಟಣೆ ಇದೆ. ನಿಮ್ಮ ಪ್ರಶ್ನೆ ಕಳೆದುಹೋಗಿಲ್ಲ — ದಯವಿಟ್ಟು ಕೆಲವು ಸೆಕೆಂಡುಗಳ ನಂತರ "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ" ಒತ್ತಿರಿ.';
+    }
+    if (language === 'te') {
+      return 'Google Gemini సేవపై ప్రస్తుతం తాత్కాలిక రద్దీ ఎక్కువగా ఉంది. మీ ప్రశ్న అలాగే ఉంది — దయచేసి కొన్ని సెకన్ల తర్వాత "మళ్ళీ ప్రయత్నించండి" నొక్కండి.';
+    }
+    return 'Google Gemini is temporarily busy due to high demand. Your message was not lost — please wait a few seconds and tap Retry.';
+  }
+
+  if (code === 'AI_TIMEOUT') {
+    if (language === 'kn') {
+      return 'Google Gemini ಉತ್ತರಿಸಲು ನಿರೀಕ್ಷಿತಕ್ಕಿಂತ ಹೆಚ್ಚು ಸಮಯ ತೆಗೆದುಕೊಂಡಿತು. ದಯವಿಟ್ಟು "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ" ಒತ್ತಿರಿ ಅಥವಾ ಚಿಕ್ಕ ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಿ.';
+    }
+    if (language === 'te') {
+      return 'Google Gemini సమాధానం ఇవ్వడానికి ఎక్కువ సమయం తీసుకుంది. దయచేసి "మళ్ళీ ప్రయత్నించండి" నొక్కండి లేదా చిన్న ప్రశ్న అడగండి.';
+    }
+    return 'Google Gemini took too long to respond. Please wait a moment and tap Retry, or try a shorter question.';
+  }
+
+  if (code === 'AI_QUOTA_EXCEEDED') {
+    if (language === 'kn') {
+      return 'Google Gemini API ಬಳಕೆಯ ಕೋಟಾ ತಾತ್ಕಾಲಿಕವಾಗಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ API ಪ್ಲಾನ್ ಪರಿಶೀಲಿಸಿ.';
+    }
+    if (language === 'te') {
+      return 'Google Gemini API వినియోగ కోటా తాత్కాలికంగా పూర్తయింది. దయచేసి కొద్దిసేపటి తర్వాత మళ్ళీ ప్రయత్నించండి లేదా API ప్లాన్‌ను తనిఖీ చేయండి.';
+    }
+    if (err instanceof AiClientError && err.message) {
+      return err.message;
+    }
+    return 'Google Gemini API quota is currently exhausted. Please try again later or check your API plan.';
+  }
+
+  if (code === 'RATE_LIMITED') {
+    if (language === 'kn') {
+      return 'CORE AI ತಾತ್ಕಾಲಿಕ ವಿನಂತಿ ಮಿತಿಯನ್ನು ತಲುಪಿದೆ. ದಯವಿಟ್ಟು ಕೆಲವು ಸೆಕೆಂಡುಗಳು ಕಾದು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+    }
+    if (language === 'te') {
+      return 'CORE AI తాత్కాలిక అభ్యర్థన పరిమితికి చేరుకుంది. దయచేసి కొన్ని సెకన్లు వేచి ఉండి మళ్ళీ ప్రయత్నించండి.';
+    }
+    return 'CORE AI reached a temporary request limit. Please wait a few seconds and tap Retry.';
+  }
+
+  if (err instanceof AiClientError && err.message) {
+    return err.message;
+  }
+
+  if (language === 'kn') {
+    return 'CORE AI ಸೇವೆಯನ್ನು ಈಗ ಸಂಪರ್ಕಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  }
+  if (language === 'te') {
+    return 'CORE AI సేవను ప్రస్తుతం చేరుకోలేకపోయాము. దయచేసి కొద్దిసేపటి తర్వాత మళ్ళీ ప్రయత్నించండి.';
+  }
+  return 'Unable to reach CORE AI right now. Please try again shortly.';
 }
 
 export function askCompanionAi(params: {

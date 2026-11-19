@@ -99,37 +99,219 @@ function safeJsonParse(raw: string | undefined): Record<string, unknown> {
   return JSON.parse(cleaned) as Record<string, unknown>;
 }
 
-async function callWithTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    const status =
-      typeof err === 'object' && err !== null && 'status' in err
-        ? Number((err as { status?: unknown }).status)
-        : 0;
-    const msg = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
-    const isNonRetryable =
-      status === 400 ||
-      status === 401 ||
-      status === 403 ||
-      status === 404 ||
-      status === 429 ||
-      msg.includes('api_key_invalid') ||
-      msg.includes('permission_denied') ||
-      msg.includes('invalid_argument') ||
-      msg.includes('403') ||
-      msg.includes('400') ||
-      msg.includes('429') ||
-      msg.includes('resource_exhausted');
-    if (isNonRetryable) {
-      throw err;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    return await fn();
-  }
+export interface AiAttemptDiagnostic {
+  attempt: number;
+  model: string;
+  durationMs: number;
+  outcome: 'ok' | 'error';
+  upstreamStatus?: number;
+  errorName?: string;
+  sanitizedMessage?: string;
 }
 
-export function mapGeminiError(err: unknown): AiServiceHttpError {
+export interface AiDiagnosticSnapshot {
+  timestamp: string;
+  operation: string;
+  model: string;
+  attempts: AiAttemptDiagnostic[];
+  mappedStatus?: number;
+  mappedCode?: string;
+}
+
+let lastAiDiagnostic: AiDiagnosticSnapshot | null = null;
+
+export function getLastAiDiagnostic(): AiDiagnosticSnapshot | null {
+  return lastAiDiagnostic;
+}
+
+function sanitizeDiagnosticMessage(raw: string): string {
+  return raw
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED_KEY]')
+    .replace(/key=[^&\s"']+/gi, 'key=[REDACTED]')
+    .slice(0, 300);
+}
+
+function extractUpstreamStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  if ('status' in err && typeof (err as { status?: unknown }).status === 'number') {
+    return (err as { status: number }).status;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  const jsonCodeMatch = msg.match(/"code"\s*:\s*(\d{3})/);
+  if (jsonCodeMatch) return Number(jsonCodeMatch[1]);
+  const statusMatch = msg.match(/\b(400|401|403|404|408|429|500|502|503|504)\b/);
+  if (statusMatch) return Number(statusMatch[1]);
+  return undefined;
+}
+
+function isRetryableUpstreamError(err: unknown, upstreamStatus?: number): boolean {
+  const msg = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
+  const name = (err instanceof Error ? err.name : '').toLowerCase();
+
+  // Never retry auth, permission, invalid-argument, or missing-model errors
+  if (
+    upstreamStatus === 400 ||
+    upstreamStatus === 401 ||
+    upstreamStatus === 403 ||
+    upstreamStatus === 404 ||
+    msg.includes('api_key_invalid') ||
+    msg.includes('api key not valid') ||
+    msg.includes('api_key_expired') ||
+    msg.includes('permission_denied') ||
+    msg.includes('invalid_argument') ||
+    msg.includes('not_found')
+  ) {
+    return false;
+  }
+
+  // Retry transient overload, rate limits, server 5xx, network drops, and attempt timeouts
+  return (
+    upstreamStatus === 429 ||
+    upstreamStatus === 408 ||
+    upstreamStatus === 500 ||
+    upstreamStatus === 502 ||
+    upstreamStatus === 503 ||
+    upstreamStatus === 504 ||
+    name === 'timeouterror' ||
+    name === 'aborterror' ||
+    msg.includes('unavailable') ||
+    msg.includes('overloaded') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('aborted') ||
+    msg.includes('etimedout') ||
+    msg.includes('econnreset') ||
+    msg.includes('fetch failed') ||
+    msg.includes('network')
+  );
+}
+
+function extractProviderRetryDelayMs(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null) {
+    // Check response headers if exposed by SDK
+    const maybeResp = (err as { response?: { headers?: { get?: (k: string) => string | null; [k: string]: unknown } } }).response;
+    const headerVal =
+      typeof maybeResp?.headers?.get === 'function'
+        ? maybeResp.headers.get('retry-after')
+        : typeof maybeResp?.headers?.['retry-after'] === 'string'
+        ? maybeResp.headers['retry-after']
+        : undefined;
+    if (headerVal) {
+      const asSeconds = Number(headerVal);
+      if (Number.isFinite(asSeconds) && asSeconds > 0) {
+        return Math.ceil(asSeconds * 1000);
+      }
+    }
+  }
+
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const retryDelayMatch = raw.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i);
+  if (retryDelayMatch) {
+    return Math.ceil(Number(retryDelayMatch[1]) * 1000);
+  }
+  const proseRetryMatch = raw.match(/retry in\s+(\d+(?:\.\d+)?)s/i);
+  if (proseRetryMatch) {
+    return Math.ceil(Number(proseRetryMatch[1]) * 1000);
+  }
+  return undefined;
+}
+
+const MAX_RETRIES = 2;
+const ATTEMPT_TIMEOUT_MS = 22_000;
+const TOTAL_RETRY_BUDGET_MS = 50_000;
+
+async function callWithExponentialBackoff<T>(
+  operation: string,
+  fn: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const startedAt = Date.now();
+  const attempts: AiAttemptDiagnostic[] = [];
+  let lastError: unknown;
+
+  for (let retryIdx = 0; retryIdx <= MAX_RETRIES; retryIdx++) {
+    const attemptStart = Date.now();
+    const elapsedTotal = attemptStart - startedAt;
+    const remainingBudget = TOTAL_RETRY_BUDGET_MS - elapsedTotal;
+
+    if (retryIdx > 0 && remainingBudget < 5_000) {
+      break;
+    }
+
+    const attemptTimeout = Math.min(ATTEMPT_TIMEOUT_MS, Math.max(5_000, remainingBudget));
+
+    try {
+      const result = await fn(AbortSignal.timeout(attemptTimeout));
+      attempts.push({
+        attempt: retryIdx + 1,
+        model: MODEL_ID,
+        durationMs: Date.now() - attemptStart,
+        outcome: 'ok',
+      });
+      lastAiDiagnostic = {
+        timestamp: new Date().toISOString(),
+        operation,
+        model: MODEL_ID,
+        attempts,
+        mappedStatus: 200,
+        mappedCode: 'OK',
+      };
+      return result;
+    } catch (err) {
+      lastError = err;
+      const upstreamStatus = extractUpstreamStatus(err);
+      const rawMsg = err instanceof Error ? err.message : String(err ?? 'Unknown error');
+      const errName = err instanceof Error ? err.name : typeof err;
+
+      attempts.push({
+        attempt: retryIdx + 1,
+        model: MODEL_ID,
+        durationMs: Date.now() - attemptStart,
+        outcome: 'error',
+        upstreamStatus,
+        errorName: errName,
+        sanitizedMessage: sanitizeDiagnosticMessage(rawMsg),
+      });
+
+      const canRetry =
+        retryIdx < MAX_RETRIES && isRetryableUpstreamError(err, upstreamStatus);
+
+      if (!canRetry) {
+        break;
+      }
+
+      const providerDelayMs = extractProviderRetryDelayMs(err);
+      const expBackoffMs = 1000 * Math.pow(2, retryIdx);
+      const jitterMs = Math.floor(Math.random() * 350);
+      const delayMs =
+        providerDelayMs !== undefined
+          ? Math.max(expBackoffMs, providerDelayMs) + jitterMs
+          : expBackoffMs + jitterMs;
+
+      // Respect provider retry guidance: if requested wait exceeds our safe HTTP budget, stop instead of hammering upstream
+      if (Date.now() - startedAt + delayMs + 6_000 > TOTAL_RETRY_BUDGET_MS) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  const mapped = mapGeminiError(lastError, { log: false });
+  lastAiDiagnostic = {
+    timestamp: new Date().toISOString(),
+    operation,
+    model: MODEL_ID,
+    attempts,
+    mappedStatus: mapped.status,
+    mappedCode: mapped.code,
+  };
+  throw lastError;
+}
+
+export function mapGeminiError(
+  err: unknown,
+  options: { log?: boolean } = { log: true }
+): AiServiceHttpError {
   if (
     typeof err === 'object' &&
     err !== null &&
@@ -140,40 +322,73 @@ export function mapGeminiError(err: unknown): AiServiceHttpError {
     return err as AiServiceHttpError;
   }
 
-  const upstreamStatus =
-    typeof err === 'object' && err !== null && 'status' in err
-      ? Number((err as { status?: unknown }).status)
-      : undefined;
+  const upstreamStatus = extractUpstreamStatus(err);
   const rawMsg = err instanceof Error ? err.message : String(err ?? 'Unknown AI service error');
-  console.error('[CORE AI upstream error]', upstreamStatus ?? '', rawMsg);
   const lower = rawMsg.toLowerCase();
+  const providerDelayMs = extractProviderRetryDelayMs(err);
+  const retryHintSec = providerDelayMs ? Math.max(1, Math.ceil(providerDelayMs / 1000)) : undefined;
+  const retryHintLabel =
+    retryHintSec === undefined
+      ? undefined
+      : retryHintSec >= 3600
+      ? `~${Math.round(retryHintSec / 3600)} hour(s)`
+      : retryHintSec >= 120
+      ? `~${Math.round(retryHintSec / 60)} minute(s)`
+      : `~${retryHintSec}s`;
+
+  const shouldLog = options.log !== false;
+  if (shouldLog) {
+    const isExpectedTransient =
+      upstreamStatus === 429 ||
+      upstreamStatus === 503 ||
+      upstreamStatus === 504 ||
+      upstreamStatus === 408 ||
+      lower.includes('unavailable') ||
+      lower.includes('overloaded') ||
+      lower.includes('aborted') ||
+      lower.includes('timeout');
+
+    if (isExpectedTransient) {
+      console.warn('[CORE AI transient upstream]', upstreamStatus ?? '', sanitizeDiagnosticMessage(rawMsg));
+    } else {
+      console.error('[CORE AI upstream error]', upstreamStatus ?? '', sanitizeDiagnosticMessage(rawMsg));
+    }
+  }
 
   if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || lower.includes('api_key_expired')) {
     return {
       status: 400,
       code: 'AI_KEY_INVALID',
-      message: 'The server Gemini API key was rejected or expired. Please update GEMINI_API_KEY in Settings > Secrets.',
+      message: 'The server Gemini API key was rejected or expired. Please check GEMINI_API_KEY in Settings > Secrets.',
     };
   }
-  if (upstreamStatus === 403 || lower.includes('permission_denied') || lower.includes('403')) {
+  if (upstreamStatus === 401 || upstreamStatus === 403 || lower.includes('permission_denied')) {
     return {
       status: 403,
       code: 'AI_PERMISSION_DENIED',
-      message: 'Gemini API access was denied. Check the server API key permissions in Settings > Secrets.',
+      message: 'Gemini API access was denied. Please check the API key permissions in Settings > Secrets.',
     };
   }
-  if (upstreamStatus === 429 || lower.includes('resource_exhausted') || lower.includes('429')) {
+  if (upstreamStatus === 429 || lower.includes('resource_exhausted')) {
+    const isQuotaExhausted = lower.includes('quota') || lower.includes('billing');
+    const isLongWait = retryHintSec !== undefined && retryHintSec > 300;
     return {
       status: 429,
       code: 'AI_QUOTA_EXCEEDED',
-      message: 'AI service rate limit reached temporarily. Please wait a moment and try again.',
+      message: isQuotaExhausted
+        ? `Google Gemini API quota for this tier is currently exhausted${retryHintLabel ? ` (retry suggested in ${retryHintLabel})` : ''}. ${
+            isLongWait
+              ? 'Please try again later or check your Gemini API plan and billing.'
+              : 'Please wait briefly and tap Retry.'
+          }`
+        : `Google Gemini temporary rate limit reached${retryHintLabel ? ` (retry suggested in ${retryHintLabel})` : ''}. Please wait a moment and tap Retry.`,
     };
   }
-  if (upstreamStatus === 404 || lower.includes('not_found') || lower.includes('404')) {
+  if (upstreamStatus === 404 || lower.includes('not_found')) {
     return {
       status: 502,
       code: 'AI_MODEL_UNAVAILABLE',
-      message: 'The configured Gemini model could not be reached right now.',
+      message: `The configured Gemini model (${MODEL_ID}) could not be found right now.`,
     };
   }
   if (upstreamStatus === 400 || lower.includes('invalid_argument')) {
@@ -183,18 +398,24 @@ export function mapGeminiError(err: unknown): AiServiceHttpError {
       message: 'The AI service could not process that prompt format. Please try rephrasing.',
     };
   }
-  if (lower.includes('aborted') || lower.includes('timeout') || lower.includes('etimedout')) {
-    return {
-      status: 504,
-      code: 'AI_TIMEOUT',
-      message: 'The AI service took too long to respond. Please try again in a moment.',
-    };
-  }
   if (upstreamStatus === 503 || lower.includes('unavailable') || lower.includes('overloaded')) {
     return {
       status: 503,
       code: 'AI_SERVICE_BUSY',
-      message: 'The Gemini AI service is temporarily busy. Please try again in a few seconds.',
+      message: `Google Gemini (${MODEL_ID}) is temporarily overloaded due to high demand. Your message was not lost — please wait ${retryHintSec ? `about ${retryHintSec} seconds` : 'a few seconds'} and tap Retry.`,
+    };
+  }
+  if (
+    upstreamStatus === 408 ||
+    upstreamStatus === 504 ||
+    lower.includes('aborted') ||
+    lower.includes('timeout') ||
+    lower.includes('etimedout')
+  ) {
+    return {
+      status: 504,
+      code: 'AI_TIMEOUT',
+      message: 'Google Gemini took too long to respond. Your question was not lost — please tap Retry or ask a shorter question.',
     };
   }
 
@@ -307,12 +528,12 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
     .join('\n\n');
 
   const ai = getGeminiClient();
-  const response = await callWithTransientRetry(() =>
+  const response = await callWithExponentialBackoff('companion', (abortSignal) =>
     ai.models.generateContent({
       model: MODEL_ID,
       contents: promptBody,
       config: {
-        abortSignal: AbortSignal.timeout(25_000),
+        abortSignal,
         systemInstruction,
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: 'application/json',
@@ -415,12 +636,12 @@ export async function runClarityAi(payload: ClarityRequestPayload) {
   ].join('\n');
 
   const ai = getGeminiClient();
-  const response = await callWithTransientRetry(() =>
+  const response = await callWithExponentialBackoff('clarity', (abortSignal) =>
     ai.models.generateContent({
       model: MODEL_ID,
       contents: `Original non-clinical or administrative instruction to clarify:\n"${instructionText}"`,
       config: {
-        abortSignal: AbortSignal.timeout(25_000),
+        abortSignal,
         systemInstruction,
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: 'application/json',
@@ -507,7 +728,7 @@ export async function runSmartJourneyAi(payload: SmartJourneyRequestPayload) {
   ].join('\n');
 
   const ai = getGeminiClient();
-  const response = await callWithTransientRetry(() =>
+  const response = await callWithExponentialBackoff('smart-journey', (abortSignal) =>
     ai.models.generateContent({
       model: MODEL_ID,
       contents: `Patient's visit preparation request:\n"${needDescription}"`,
@@ -515,7 +736,7 @@ export async function runSmartJourneyAi(payload: SmartJourneyRequestPayload) {
         systemInstruction,
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: 'application/json',
-        abortSignal: AbortSignal.timeout(25_000),
+        abortSignal,
         responseSchema: {
           type: Type.OBJECT,
           properties: {

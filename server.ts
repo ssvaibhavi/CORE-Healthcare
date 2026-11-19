@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   checkRateLimit,
+  getLastAiDiagnostic,
   mapGeminiError,
   runClarityAi,
   runCompanionAi,
@@ -32,6 +33,7 @@ async function startServer() {
       ok: true,
       service: 'CORE Rosewater API',
       aiConfigured: keyConfigured,
+      lastAiDiagnostic: getLastAiDiagnostic(),
     });
   });
 

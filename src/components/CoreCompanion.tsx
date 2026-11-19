@@ -3,7 +3,7 @@ import { CoreMonogramMark } from './BotanicalMotifs';
 import { AiConsentNotice } from './AiConsentNotice';
 import { AiTrustHeader, AiTrustFooter, AiSkeletonLoader } from './AiTrustLayer';
 import { ComfortSettings, Language, PageView } from '../types';
-import { askCompanionAi, AiClientError } from '../utils/aiClient';
+import { askCompanionAi, formatAiErrorMessage } from '../utils/aiClient';
 import { speechService } from '../utils/speech';
 import {
   MessageCircleHeart,
@@ -11,6 +11,7 @@ import {
   Send,
   Volume2,
   ArrowRight,
+  ArrowDown,
   HelpCircle,
   ShieldAlert,
   Sparkles,
@@ -22,7 +23,9 @@ import {
   Compass,
   CheckCircle2,
   Check,
-  Search
+  Search,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface CompanionMessage {
@@ -658,6 +661,113 @@ const PAGE_CONTEXT_CONFIG: Record<PageView, PageContextEntry> = {
   },
 };
 
+function renderInlineFormatting(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return (
+        <strong key={idx} className="font-semibold text-[#322826]">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+}
+
+const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      i += 1;
+      continue;
+    }
+
+    // Markdown headings (#, ##, ###)
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      blocks.push(
+        <h4
+          key={`h-${i}`}
+          className="font-display text-lg sm:text-[19px] font-bold text-[#322826] leading-snug pt-2 first:pt-0"
+        >
+          {renderInlineFormatting(headingMatch[2])}
+        </h4>
+      );
+      i += 1;
+      continue;
+    }
+
+    // Unordered list block (- , * , • )
+    if (/^[-*•]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*•]\s+/, ''));
+        i += 1;
+      }
+      blocks.push(
+        <ul key={`ul-${i}`} className="list-disc pl-5 space-y-1.5 my-1">
+          {items.map((item, idx) => (
+            <li key={idx} className="pl-0.5">
+              {renderInlineFormatting(item)}
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // Ordered list block (1. , 2. )
+    if (/^\d+[.)]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^\d+[.)]\s+/, ''));
+        i += 1;
+      }
+      blocks.push(
+        <ol key={`ol-${i}`} className="list-decimal pl-5 space-y-1.5 my-1">
+          {items.map((item, idx) => (
+            <li key={idx} className="pl-0.5">
+              {renderInlineFormatting(item)}
+            </li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    // Paragraph (collect consecutive non-empty plain lines)
+    const paraLines: string[] = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() !== '' &&
+      !/^(#{1,3})\s+/.test(lines[i].trim()) &&
+      !/^[-*•]\s+/.test(lines[i].trim()) &&
+      !/^\d+[.)]\s+/.test(lines[i].trim())
+    ) {
+      paraLines.push(lines[i].trim());
+      i += 1;
+    }
+    blocks.push(
+      <p key={`p-${i}`} className="leading-[1.65]">
+        {renderInlineFormatting(paraLines.join(' '))}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3 text-[15.5px] sm:text-[16.5px] leading-[1.65] text-[#322826] break-words">
+      {blocks}
+    </div>
+  );
+};
+
 interface CoreCompanionProps {
   language: Language;
   currentPage: PageView;
@@ -697,7 +807,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
     return 'Hello! I am CORE AI Companion (powered by Google Gemini). Switch to "Guide Me Through It" for interactive step-by-step help, or ask any navigation & clarity question here. I am an AI guide, not a clinician.';
   };
 
-  const [mode, setMode] = useState<'guide' | 'chat'>('guide');
+  const [mode, setMode] = useState<'guide' | 'chat'>('chat');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(GUIDED_WORKFLOWS[0].id);
   const [completedStepIds, setCompletedStepIds] = useState<Record<string, boolean>>({});
   const [stepTip, setStepTip] = useState<{ text: string; safety?: string } | null>(null);
@@ -711,8 +821,20 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [safetyInfoOpen, setSafetyInfoOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const [mobileViewport, setMobileViewport] = useState<{ height: number; offsetTop: number } | null>(
+    null
+  );
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const latestMessageStartRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const pendingReplyScrollRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setMessages([
@@ -727,14 +849,112 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       setCompletedStepIds({});
       setStepTip(null);
       setTipError(null);
+      setSafetyInfoOpen(false);
+      setSuggestionsOpen(false);
     }
   }, [language, resetSignal]);
 
+  // Track mobile visualViewport so virtual keyboard never obscures chat composer
   useEffect(() => {
-    if (isOpen && !isMinimized && mode === 'chat') {
-      endRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
+    if (!isOpen || isMinimized || typeof window === 'undefined') {
+      setMobileViewport(null);
+      return;
     }
-  }, [messages, isLoading, isOpen, isMinimized, mode, reduceMotion]);
+
+    const updateViewport = () => {
+      if (window.innerWidth >= 640) {
+        setMobileViewport(null);
+        return;
+      }
+      const vv = window.visualViewport;
+      if (vv) {
+        setMobileViewport({
+          height: Math.round(vv.height),
+          offsetTop: Math.round(vv.offsetTop),
+        });
+      } else {
+        setMobileViewport({
+          height: window.innerHeight,
+          offsetTop: 0,
+        });
+      }
+    };
+
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    window.visualViewport?.addEventListener('resize', updateViewport);
+    window.visualViewport?.addEventListener('scroll', updateViewport);
+
+    return () => {
+      window.removeEventListener('resize', updateViewport);
+      window.visualViewport?.removeEventListener('resize', updateViewport);
+      window.visualViewport?.removeEventListener('scroll', updateViewport);
+    };
+  }, [isOpen, isMinimized]);
+
+  const scrollToBottom = (force = false) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (force || isNearBottomRef.current) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      });
+    }
+  };
+
+  const handleMessagesScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const currentTop = container.scrollTop;
+    // If user actively scrolled upward, cancel pending auto-scroll so we never fight their reading position
+    if (currentTop < lastScrollTopRef.current - 8) {
+      pendingReplyScrollRef.current = false;
+    }
+    lastScrollTopRef.current = currentTop;
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const nearBottom = distanceFromBottom <= 88;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollToBottom(!nearBottom && messages.length > 1);
+  };
+
+  useEffect(() => {
+    if (!isOpen || isMinimized || mode !== 'chat') return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg) return;
+
+    if (lastMsg.sender === 'user') {
+      scrollToBottom(true);
+      return;
+    }
+
+    if (pendingReplyScrollRef.current || isNearBottomRef.current) {
+      pendingReplyScrollRef.current = false;
+      const startEl = latestMessageStartRef.current;
+      if (startEl && lastMsg.id !== 'welcome' && !lastMsg.id.startsWith('welcome-')) {
+        // Scroll independently inside container to the start of the latest AI message so long responses start at the top
+        const targetTop = Math.max(0, startEl.offsetTop - 16);
+        container.scrollTo({
+          top: targetTop,
+          behavior: reduceMotion ? 'auto' : 'smooth',
+        });
+      } else {
+        scrollToBottom(false);
+      }
+    }
+  }, [messages, isOpen, isMinimized, mode, reduceMotion]);
+
+  useEffect(() => {
+    if (isLoading && isOpen && !isMinimized && mode === 'chat' && isNearBottomRef.current) {
+      scrollToBottom(false);
+    }
+  }, [isLoading, isOpen, isMinimized, mode]);
 
   const activePageCtx = PAGE_CONTEXT_CONFIG[currentPage] || PAGE_CONTEXT_CONFIG.home;
 
@@ -772,34 +992,48 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       });
       setStepTip({ text: res.reply, safety: res.safetyNotice });
     } catch (err) {
-      setTipError(
-        err instanceof AiClientError
-          ? err.message
-          : language === 'kn'
-          ? 'ಈಗ Gemini ಸಲಹೆ ಪಡೆಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.'
-          : language === 'te'
-          ? 'ప్రస్తుతం Gemini సూచన పొందడం సాధ్యం కాలేదు.'
-          : 'Unable to fetch Gemini tip right now.'
-      );
+      setTipError(formatAiErrorMessage(err, language));
     } finally {
       setTipLoading(false);
     }
   };
 
-  const sendMessageToGemini = async (rawText: string) => {
+  const sendMessageToGemini = async (
+    rawText: string,
+    options: { isRetry?: boolean } = {}
+  ) => {
     const cleaned = rawText.trim();
     if (!cleaned || isLoading) return;
-    if (!aiConsentGranted) return;
+    if (!aiConsentGranted) {
+      setSafetyInfoOpen(true);
+      return;
+    }
 
-    const userMsg: CompanionMessage = {
-      id: `u-${Date.now()}`,
-      sender: 'user',
-      text: cleaned,
-    };
+    const baseMessages = options.isRetry
+      ? messages.filter((m, idx) => !(idx === messages.length - 1 && m.sender === 'error'))
+      : messages;
 
-    const nextMessages = [...messages, userMsg];
+    const nextMessages: CompanionMessage[] = options.isRetry
+      ? baseMessages
+      : [
+          ...baseMessages,
+          {
+            id: `u-${Date.now()}`,
+            sender: 'user',
+            text: cleaned,
+          },
+        ];
+
+    pendingReplyScrollRef.current = true;
+    isNearBottomRef.current = true;
+    setSuggestionsOpen(false);
     setMessages(nextMessages);
-    setInputText('');
+    if (!options.isRetry) {
+      setInputText('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    }
     setLastFailedPrompt(null);
     setIsLoading(true);
 
@@ -836,10 +1070,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
         },
       ]);
     } catch (err) {
-      const msg =
-        err instanceof AiClientError
-          ? err.message
-          : 'Unable to reach CORE AI right now. Please try again.';
+      const msg = formatAiErrorMessage(err, language);
       setLastFailedPrompt(cleaned);
       setMessages((prev) => [
         ...prev,
@@ -859,127 +1090,151 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
     void sendMessageToGemini(inputText);
   };
 
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputText(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 108)}px`;
+  };
+
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void sendMessageToGemini(inputText);
+    }
+  };
+
+  const latestMessageIndex = messages.length - 1;
+
+  // Dynamic mobile viewport style for virtual keyboard safety
+  const mobileOverlayStyle: React.CSSProperties | undefined =
+    isOpen && !isMinimized && mobileViewport
+      ? {
+          top: `${mobileViewport.offsetTop + 8}px`,
+          height: `${Math.max(320, mobileViewport.height - 16)}px`,
+          left: '8px',
+          right: '8px',
+        }
+      : undefined;
+
   return (
-    <div className="fixed bottom-5 right-5 z-40 no-print flex flex-col items-end gap-3">
-      {/* Companion Drawer */}
-      {isOpen && (
+    <>
+      {/* Open Companion Dialog (Desktop floating large drawer; Mobile nearly full-screen) */}
+      {isOpen && !isMinimized && (
         <div
-          className={`bg-[#FCF9F5] border border-[#BEA06D]/70 rounded-3xl shadow-xl overflow-hidden flex flex-col modal-soft-enter transition-all duration-300 ${
-            isMinimized
-              ? 'w-[300px] sm:w-[340px]'
-              : isExpanded
-              ? 'w-[calc(100vw-2rem)] sm:w-[560px] max-h-[85vh]'
-              : 'w-[calc(100vw-2.25rem)] sm:w-[430px] max-h-[80vh]'
+          style={mobileOverlayStyle}
+          className={`fixed z-50 no-print flex flex-col bg-[#FCF9F5] border border-[#BEA06D]/75 rounded-3xl shadow-2xl overflow-hidden modal-soft-enter companion-drawer-transition ${
+            mobileViewport
+              ? 'w-auto'
+              : 'inset-2 sm:inset-auto sm:bottom-5 sm:right-5'
+          } ${
+            isExpanded
+              ? 'sm:w-[min(600px,calc(100vw-2.5rem))] sm:h-[min(85dvh,840px)]'
+              : 'sm:w-[min(520px,calc(100vw-2.5rem))] sm:h-[min(78dvh,700px)]'
           }`}
           role="dialog"
+          aria-modal="false"
           aria-label="CORE AI Companion"
         >
-          {/* Drawer Header */}
-          <div className="bg-white border-b border-[#BEA06D]/25 px-4 py-3.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <CoreMonogramMark size="sm" />
-              <div>
-                <h3 className="font-display text-lg sm:text-xl font-bold text-[#493C39] leading-none flex items-center gap-1.5">
-                  <span>
-                    {language === 'kn'
-                      ? 'CORE AI ಸಹಾಯಕ'
-                      : language === 'te'
-                      ? 'CORE AI సహాయకుడు'
-                      : 'CORE Companion'}
+          {/* Compact Top Header */}
+          <div className="shrink-0 bg-white border-b border-[#BEA06D]/25 px-3.5 py-2.5 sm:px-5 sm:py-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <CoreMonogramMark size="sm" />
+                <div className="min-w-0">
+                  <div className="font-display text-lg sm:text-xl font-bold text-[#493C39] leading-none flex items-center gap-1.5 truncate">
+                    <span className="truncate">
+                      {language === 'kn'
+                        ? 'CORE AI ಸಹಾಯಕ'
+                        : language === 'te'
+                        ? 'CORE AI సహాయకుడు'
+                        : 'CORE Companion'}
+                    </span>
+                    <Sparkles className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
+                  </div>
+                  <span className="text-[11px] text-[#8A6D3F] font-medium block mt-0.5 truncate">
+                    {activePageCtx.title[language]}
                   </span>
-                  <Sparkles className="w-3.5 h-3.5 text-[#C88F98]" />
-                </h3>
-                <span className="text-[11px] text-[#8A6D3F] font-medium block mt-0.5">
-                  {language === 'kn'
-                    ? 'ಮಾರ್ಗದರ್ಶಕ · ವೈದ್ಯರಲ್ಲ'
-                    : language === 'te'
-                    ? 'మార్గదర్శి · డాక్టర్ కాదు'
-                    : 'Guided Assistant · Not a Clinician'}
-                </span>
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  onPageChange('voicebridge');
-                  onToggleOpen(false);
-                }}
-                className="compact-chip px-2 py-1 rounded-full bg-[#A2B29B]/20 text-[#4A6347] hover:bg-[#A2B29B]/35 text-[11px] font-semibold hidden sm:inline-flex items-center gap-1 cursor-pointer"
-                title={language === 'kn' ? 'ಧ್ವನಿ ಸೇತು ತೆರೆಯಿರಿ' : language === 'te' ? 'వాయిస్ బ్రిడ్జ్ తెరవండి' : 'Open CORE VoiceBridge'}
-              >
-                <Mic className="w-3 h-3" />
-                <span>{language === 'kn' ? 'ಧ್ವನಿ' : language === 'te' ? 'వాయిస్' : 'Voice'}</span>
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPageChange('voicebridge');
+                    onToggleOpen(false);
+                  }}
+                  className="compact-chip min-h-[36px] px-2.5 py-1 rounded-full bg-[#A2B29B]/20 text-[#4A6347] hover:bg-[#A2B29B]/35 text-[11px] font-semibold hidden sm:inline-flex items-center gap-1 cursor-pointer"
+                  title={
+                    language === 'kn'
+                      ? 'ಧ್ವನಿ ಸೇತು ತೆರೆಯಿರಿ'
+                      : language === 'te'
+                      ? 'వాయిస్ బ్రిడ్జ్ తెరవండి'
+                      : 'Open CORE VoiceBridge'
+                  }
+                >
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>{language === 'kn' ? 'ಧ್ವನಿ' : language === 'te' ? 'వాయిస్' : 'Voice'}</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setIsMinimized((m) => !m)}
-                className="compact-chip p-1.5 rounded-full text-[#493C39]/70 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 cursor-pointer"
-                aria-label={isMinimized ? 'Restore Companion' : 'Minimize Companion'}
-                title={isMinimized ? 'Restore' : 'Minimize'}
-              >
-                <Minus className="w-4 h-4" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMinimized(true)}
+                  className="compact-chip min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 inline-flex items-center justify-center cursor-pointer"
+                  aria-label="Minimize Companion"
+                  title={language === 'kn' ? 'ಕಿರಿದುಗೊಳಿಸಿ' : language === 'te' ? 'చిన్నదిగా చేయండి' : 'Minimize'}
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
 
-              {!isMinimized && (
                 <button
                   type="button"
                   onClick={() => setIsExpanded((e) => !e)}
-                  className="compact-chip p-1.5 rounded-full text-[#493C39]/70 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 cursor-pointer"
-                  aria-label={isExpanded ? 'Compact size' : 'Expand size'}
-                  title={isExpanded ? 'Compact' : 'Expand'}
+                  className="compact-chip min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 hidden sm:inline-flex items-center justify-center cursor-pointer"
+                  aria-label={isExpanded ? 'Restore default chat size' : 'Expand chat window'}
+                  title={
+                    isExpanded
+                      ? language === 'kn'
+                        ? 'ಸಾಮಾನ್ಯ ಗಾತ್ರ'
+                        : language === 'te'
+                        ? 'సాధారణ పరిమాణం'
+                        : 'Compact view'
+                      : language === 'kn'
+                      ? 'ದೊಡ್ಡ ಗಾತ್ರಕ್ಕೆ ವಿಸ್ತರಿಸಿ'
+                      : language === 'te'
+                      ? 'పెద్ద విండోకు విస్తరించండి'
+                      : 'Expand view'
+                  }
                 >
                   {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                 </button>
-              )}
 
-              <button
-                type="button"
-                onClick={() => onToggleOpen(false)}
-                className="compact-chip p-1.5 rounded-full text-[#493C39]/70 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 cursor-pointer"
-                aria-label="Close Companion"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {!isMinimized && (
-            <>
-              {/* Mode Switcher: Guide Me Through It | Ask CORE AI */}
-              <div className="bg-white border-b border-[#BEA06D]/20 px-4 py-2 flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setMode('guide')}
-                  className={`compact-chip flex-1 py-2 px-3 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    mode === 'guide'
-                      ? 'bg-[#BEA06D] text-white shadow-xs'
-                      : 'bg-[#FCF9F5] text-[#493C39] hover:bg-[#E6C1C4]/20'
-                  }`}
+                  onClick={() => onToggleOpen(false)}
+                  className="compact-chip min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 inline-flex items-center justify-center cursor-pointer"
+                  aria-label="Close Companion"
+                  title={language === 'kn' ? 'ಮುಚ್ಚಿ' : language === 'te' ? 'మూసివేయండి' : 'Close'}
                 >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>
-                    {language === 'kn'
-                      ? 'ಹಂತ-ಹಂತದ ಮಾರ್ಗದರ್ಶಿ'
-                      : language === 'te'
-                      ? 'దశల వారీ సహాయం'
-                      : 'Guide Me Through It'}
-                  </span>
+                  <X className="w-4 h-4" />
                 </button>
+              </div>
+            </div>
 
+            {/* Compact Mode Tabs + Collapsible Safety Trigger */}
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="inline-flex items-center bg-[#FCF9F5] border border-[#BEA06D]/25 rounded-xl p-0.5 flex-1 sm:flex-initial">
                 <button
                   type="button"
                   onClick={() => setMode('chat')}
-                  className={`compact-chip flex-1 py-2 px-3 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  className={`compact-chip flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                     mode === 'chat'
                       ? 'bg-[#C88F98] text-white shadow-xs'
-                      : 'bg-[#FCF9F5] text-[#493C39] hover:bg-[#E6C1C4]/20'
+                      : 'text-[#493C39] hover:bg-[#E6C1C4]/20'
                   }`}
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span className="whitespace-nowrap">
                     {language === 'kn'
                       ? 'CORE AI ಕೇಳಿ'
                       : language === 'te'
@@ -987,295 +1242,106 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                       : 'Ask CORE AI'}
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMode('guide')}
+                  className={`compact-chip flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    mode === 'guide'
+                      ? 'bg-[#BEA06D] text-white shadow-xs'
+                      : 'text-[#493C39] hover:bg-[#E6C1C4]/20'
+                  }`}
+                >
+                  <Compass className="w-3.5 h-3.5 shrink-0" />
+                  <span className="whitespace-nowrap">
+                    {language === 'kn'
+                      ? 'ಹಂತ ಮಾರ್ಗದರ್ಶಿ'
+                      : language === 'te'
+                      ? 'దశల సహాయం'
+                      : 'Step Guide'}
+                  </span>
+                </button>
               </div>
 
-              {mode === 'guide' ? (
-                /* MODE 1: INTERACTIVE "GUIDE ME THROUGH IT" WORKFLOW */
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#FCF9F5]">
-                  <div className="space-y-1.5">
-                    <span className="text-[11px] font-bold text-[#8A6D3F] uppercase tracking-wider block">
-                      {language === 'kn'
-                        ? '೧. ನಿಮಗೆ ಬೇಕಾದ ಸಹಾಯವನ್ನು ಆರಿಸಿ'
-                        : language === 'te'
-                        ? '1. మీకు కావాల్సిన పనిని ఎంచుకోండి'
-                        : '1. Choose what you would like help with'}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {GUIDED_WORKFLOWS.map((wf) => (
-                        <button
-                          key={wf.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedWorkflowId(wf.id);
-                            setStepTip(null);
-                            setTipError(null);
-                          }}
-                          className={`compact-chip text-left px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                            wf.id === selectedWorkflowId
-                              ? 'bg-[#493C39] text-white border-[#493C39]'
-                              : 'bg-white border-[#BEA06D]/35 text-[#493C39] hover:border-[#C88F98]'
-                          }`}
-                        >
-                          {wf.title[language]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              {mode === 'chat' && (
+                <button
+                  type="button"
+                  onClick={() => setSafetyInfoOpen((s) => !s)}
+                  aria-expanded={safetyInfoOpen}
+                  className={`compact-chip py-1.5 px-2.5 rounded-xl text-[11px] font-semibold border inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
+                    safetyInfoOpen
+                      ? 'bg-[#E6C1C4]/30 border-[#C88F98] text-[#493C39]'
+                      : 'bg-[#FCF9F5] border-[#BEA06D]/30 text-[#8A6D3F] hover:border-[#C88F98]'
+                  }`}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
+                  <span className="whitespace-nowrap">
+                    {language === 'kn'
+                      ? 'ಸುರಕ್ಷತೆ & ಮಾಹಿತಿ'
+                      : language === 'te'
+                      ? 'భద్రత & వివరాలు'
+                      : 'Safety & Context'}
+                  </span>
+                  {safetyInfoOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                </button>
+              )}
+            </div>
 
-                  {/* Selected Workflow Card */}
-                  <div className="bg-white border border-[#BEA06D]/40 rounded-2xl p-4 space-y-3.5 soft-fade-up">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <h4 className="font-display text-lg font-bold text-[#493C39] leading-snug">
-                          {activeWorkflow.title[language]}
-                        </h4>
-                        <p className="text-xs text-[#493C39]/80 leading-relaxed">
-                          {activeWorkflow.summary[language]}
-                        </p>
-                      </div>
-                      <span className="text-xs font-bold tabular-nums text-[#4A6347] shrink-0">
-                        {wfCompletedCount}/{wfTotal}
+            {/* Collapsible Safety, Screen Context & Settings Panel */}
+            {mode === 'chat' && (
+              <div className="graceful-expand" data-open={safetyInfoOpen ? 'true' : 'false'}>
+                <div>
+                  <div className="mt-2.5 pt-2.5 border-t border-[#BEA06D]/20 space-y-2.5">
+                    <div className="p-3 rounded-2xl bg-[#E6C1C4]/22 border border-[#E6C1C4]/70 flex items-start gap-2 text-xs text-[#493C39] leading-relaxed">
+                      <ShieldAlert className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
+                      <span>
+                        {language === 'kn'
+                          ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ: ರೋಗನಿರ್ಣಯ, ಔಷಧಿ ಪ್ರಮಾಣ ಅಥವಾ ತುರ್ತು ವೈದ್ಯಕೀಯ ಸಲಹೆ ನೀಡುವುದಿಲ್ಲ. ಪ್ರಮುಖ ವಿವರಗಳನ್ನು ಆಸ್ಪತ್ರೆ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಖಚಿತಪಡಿಸಿ.'
+                          : language === 'te'
+                          ? 'AI మార్గదర్శనం మాత్రమే: వ్యాధి నిర్ధారణ, మందుల మోతాదు లేదా అత్యవసర సలహాలు ఇవ్వదు. ముఖ్య వివరాలను ఆసుపత్రి సిబ్బందితో ధృవీకరించండి.'
+                          : 'AI Guide Only — cannot diagnose conditions, adjust medicines, or verify hospital bookings. Confirm clinical details with hospital staff.'}
                       </span>
                     </div>
 
-                    {/* Progress Bar */}
-                    <div className="w-full h-2 bg-[#FCF9F5] border border-[#BEA06D]/25 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#4A6347] rounded-full transition-all duration-500"
-                        style={{ width: `${wfPct}%` }}
-                      />
-                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                      <span className="text-[#8A6D3F] font-medium">
+                        {language === 'kn'
+                          ? 'ಪ್ರಸ್ತುತ ಪುಟ:'
+                          : language === 'te'
+                          ? 'ప్రస్తుత స్క్రీన్:'
+                          : 'Context:'}{' '}
+                        <strong className="text-[#493C39]">{activePageCtx.title[language]}</strong>
+                      </span>
 
-                    {/* Interactive Steps */}
-                    <div className="space-y-2.5">
-                      {activeWorkflow.steps.map((step, idx) => {
-                        const done = !!completedStepIds[step.id];
-                        return (
-                          <div
-                            key={step.id}
-                            className={`p-3 rounded-xl border transition-all space-y-2 ${
-                              done
-                                ? 'bg-[#A2B29B]/14 border-[#4A6347]/50'
-                                : 'bg-[#FCF9F5] border-[#BEA06D]/25'
-                            }`}
-                          >
-                            <div className="flex items-start gap-2.5">
-                              <button
-                                type="button"
-                                onClick={() => toggleGuidedStep(step.id)}
-                                className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 cursor-pointer transition-colors ${
-                                  done
-                                    ? 'bg-[#4A6347] border-[#4A6347] text-white check-pop'
-                                    : 'bg-white border-[#BEA06D]/60 text-transparent'
-                                }`}
-                                aria-label={`Mark step ${idx + 1} completed`}
-                              >
-                                <Check className="w-3.5 h-3.5" />
-                              </button>
-                              <div className="flex-1">
-                                <span
-                                  className={`text-xs font-bold block ${
-                                    done ? 'line-through text-[#493C39]/60' : 'text-[#493C39]'
-                                  }`}
-                                >
-                                  {idx + 1}. {step.label[language]}
-                                </span>
-                                <p className="text-[11px] text-[#493C39]/75 mt-0.5">
-                                  {step.detail[language]}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="flex justify-end">
-                              {step.opensSearch && onOpenSearch ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onToggleOpen(false);
-                                    onOpenSearch();
-                                  }}
-                                  className="compact-chip py-1 px-3 rounded-full bg-white border border-[#BEA06D]/45 hover:border-[#C88F98] text-[11px] font-semibold text-[#8A6D3F] inline-flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Search className="w-3 h-3" />
-                                  <span>{step.actionLabel?.[language] || 'Open Smart Search'}</span>
-                                </button>
-                              ) : step.targetPage ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onPageChange(step.targetPage!);
-                                    onToggleOpen(false);
-                                  }}
-                                  className="compact-chip py-1 px-3 rounded-full bg-[#BEA06D] hover:bg-[#8A6D3F] text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                                >
-                                  <span>{step.actionLabel?.[language] || 'Open Feature'}</span>
-                                  <ArrowRight className="w-3 h-3" />
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Accomplishment Summary */}
-                    {wfAllDone && (
-                      <div className="p-3.5 rounded-xl bg-[#A2B29B]/18 border border-[#4A6347]/60 space-y-2 soft-fade-up">
-                        <div className="flex items-center gap-2 text-xs font-bold text-[#4A6347] check-pop">
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>
-                            {language === 'kn'
-                              ? 'ಮಾರ್ಗದರ್ಶಿ ಹಂತಗಳು ಪೂರ್ಣಗೊಂಡಿವೆ'
-                              : language === 'te'
-                              ? 'మార్గదర్శక దశలు పూర్తయ్యాయి'
-                              : 'Workflow Steps Completed'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#493C39]/85">
-                          {language === 'kn'
-                            ? `"${activeWorkflow.title[language]}" ಗಾಗಿ ಎಲ್ಲಾ ${wfTotal} ಹಂತಗಳನ್ನು ಪೂರ್ಣಗೊಳಿಸಿದ್ದೀರಿ. ಅಂತಿಮ ಸಾರಾಂಶಕ್ಕಾಗಿ ನನ್ನ ಆರೈಕೆ ಪಯಣ ನೋಡಿ.`
-                            : language === 'te'
-                            ? `"${activeWorkflow.title[language]}" కోసం ${wfTotal} దశలూ పూర్తి చేశారు. పూర్తి సారాంశం కోసం నా ఆరోగ్య ప్రయాణం చూడండి.`
-                            : `You walked through all ${wfTotal} organizational steps for "${activeWorkflow.title[language]}". Open My Care Journey to print your Visit Summary.`}
-                        </p>
+                      <div className="flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => {
-                            onPageChange('journey');
+                            onOpenComfortMode();
                             onToggleOpen(false);
                           }}
-                          className="compact-chip py-1.5 px-3 rounded-full bg-[#4A6347] text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                          className="compact-chip text-xs font-semibold text-[#8A6D3F] underline hover:text-[#493C39] cursor-pointer"
                         >
-                          <span>
-                            {language === 'kn'
-                              ? 'ಭೇಟಿ ಸಾರಾಂಶ ನೋಡಿ'
-                              : language === 'te'
-                              ? 'విజిట్ సారాంశం చూడండి'
-                              : 'View Visit Summary'}
-                          </span>
-                          <ArrowRight className="w-3 h-3" />
+                          {language === 'kn' ? 'ಸೆಟ್ಟಿಂಗ್‌ಗಳು' : language === 'te' ? 'సెట్టింగ్స్' : 'Settings'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onPageChange('help');
+                            onToggleOpen(false);
+                          }}
+                          className="compact-chip text-xs font-semibold text-[#C88F98] hover:text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <HelpCircle className="w-3.5 h-3.5" />
+                          <span>{language === 'kn' ? 'ಸಹಾಯ' : language === 'te' ? 'సహాయం' : 'Get Help'}</span>
                         </button>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Optional Gemini Natural-Language Guidance for Current Workflow */}
-                  <div className="space-y-2.5">
-                    <AiConsentNotice
-                      language={language}
-                      consentGranted={aiConsentGranted}
-                      onAcceptConsent={onAcceptAiConsent}
-                      compact
-                    />
-
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        disabled={!aiConsentGranted || tipLoading}
-                        onClick={() => void handleGetGentleWorkflowTip(false)}
-                        className="compact-chip py-2 px-4 rounded-full bg-[#C88F98] hover:bg-[#b07680] disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>
-                          {language === 'kn'
-                            ? 'ಈ ಕೆಲಸಕ್ಕೆ ಸರಳ AI ಸಲಹೆ ಪಡೆಯಿರಿ'
-                            : language === 'te'
-                            ? 'ఈ పని కోసం సులభ AI సూచన పొందండి'
-                            : 'Get Gentle Gemini Tip for This Task'}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onOpenComfortMode();
-                          onToggleOpen(false);
-                        }}
-                        className="compact-chip text-[11px] font-semibold text-[#8A6D3F] underline cursor-pointer"
-                      >
-                        {language === 'kn'
-                          ? 'ಅನುಭವ ಸೆಟ್ಟಿಂಗ್‌ಗಳು'
-                          : language === 'te'
-                          ? 'కంఫర్ట్ సెట్టింగ్స్'
-                          : 'Experience Settings'}
-                      </button>
                     </div>
 
-                    {tipLoading && (
-                      <AiSkeletonLoader
-                        label={
-                          language === 'kn'
-                            ? 'ಸರಳ ಭಾಷೆಯ ಸಲಹೆಯನ್ನು ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ...'
-                            : language === 'te'
-                            ? 'సులభ భాషా సూచన సిద్ధం అవుతోంది...'
-                            : 'Preparing plain-language step tip...'
-                        }
-                      />
-                    )}
-
-                    {tipError && (
-                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900">
-                        {tipError}
-                      </div>
-                    )}
-
-                    {stepTip && !tipLoading && (
-                      <div className="p-4 rounded-2xl bg-white border border-[#BEA06D]/40 space-y-2.5 soft-fade-up">
-                        <AiTrustHeader
-                          language={language}
-                          label={
-                            language === 'kn'
-                              ? 'AI ಹಂತದ ಸಲಹೆ · Gemini'
-                              : language === 'te'
-                              ? 'AI దశ సూచన · Gemini'
-                              : 'AI Step Tip · Gemini'
-                          }
-                          onAskClarification={() => void handleGetGentleWorkflowTip(true)}
-                          onListen={() => speechService.speak(stepTip.text, language)}
-                          clarifyDisabled={tipLoading}
-                        />
-                        <p className="text-xs sm:text-sm text-[#493C39] leading-relaxed">{stepTip.text}</p>
-                        <AiTrustFooter language={language} uncertaintyNote={stepTip.safety} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                /* MODE 2: CONVERSATIONAL GEMINI AI COMPANION */
-                <>
-                  {/* Safety Boundary Banner */}
-                  <div className="bg-[#E6C1C4]/25 border-b border-[#E6C1C4]/60 px-4 py-2 flex items-start gap-2 text-[11px] text-[#493C39]/90">
-                    <ShieldAlert className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
-                    <span>
-                      {language === 'kn'
-                        ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ: ರೋಗನಿರ್ಣಯ, ಔಷಧಿ ಪ್ರಮಾಣ ಅಥವಾ ತುರ್ತು ವೈದ್ಯಕೀಯ ಸಲಹೆ ನೀಡುವುದಿಲ್ಲ.'
-                        : language === 'te'
-                        ? 'AI మార్గదర్శనం మాత్రమే: వ్యాధి నిర్ధారణ, మందుల మోతాదు లేదా అత్యవసర సలహాలు ఇవ్వదు.'
-                        : 'AI Guide Only — cannot diagnose conditions, adjust medicines, or verify hospital bookings. Confirm medical details with clinic staff.'}
-                    </span>
-                  </div>
-
-                  {/* Active Module Context Indicator */}
-                  <div className="bg-[#FCF9F5] border-b border-[#BEA06D]/20 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px]">
-                    <span className="text-[#8A6D3F] font-semibold">
-                      {language === 'kn'
-                        ? 'ಪ್ರಸ್ತುತ ಪುಟ:'
-                        : language === 'te'
-                        ? 'ప్రస్తుత స్క్రీన్:'
-                        : 'Current Screen:'}{' '}
-                      <strong className="text-[#493C39]">{activePageCtx.title[language]}</strong>
-                    </span>
-                    <span className="text-[10px] text-[#4A6347] font-medium">
-                      {language === 'kn'
-                        ? 'ಸಂದರ್ಭ-ಜಾಗೃತ ಸಹಾಯ'
-                        : language === 'te'
-                        ? 'సందర్భానుసార సహాయం'
-                        : 'Context-Aware Guide'}
-                    </span>
-                  </div>
-
-                  {/* Session Consent Notice */}
-                  <div className="px-4 pt-3">
                     <AiConsentNotice
                       language={language}
                       consentGranted={aiConsentGranted}
@@ -1283,27 +1349,304 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                       compact
                     />
                   </div>
+                </div>
+              </div>
+            )}
+          </div>
 
-                  {/* Messages Area */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#FCF9F5]">
-                    {messages.map((msg) => (
+          {mode === 'guide' ? (
+            /* MODE 1: INTERACTIVE "GUIDE ME THROUGH IT" WORKFLOW */
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-5 space-y-4 bg-[#FCF9F5]">
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-[#8A6D3F] uppercase tracking-wider block">
+                  {language === 'kn'
+                    ? '೧. ನಿಮಗೆ ಬೇಕಾದ ಸಹಾಯವನ್ನು ಆರಿಸಿ'
+                    : language === 'te'
+                    ? '1. మీకు కావాల్సిన పనిని ఎంచుకోండి'
+                    : '1. Choose what you would like help with'}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {GUIDED_WORKFLOWS.map((wf) => (
+                    <button
+                      key={wf.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedWorkflowId(wf.id);
+                        setStepTip(null);
+                        setTipError(null);
+                      }}
+                      className={`compact-chip text-left px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium border transition-colors cursor-pointer ${
+                        wf.id === selectedWorkflowId
+                          ? 'bg-[#493C39] text-white border-[#493C39]'
+                          : 'bg-white border-[#BEA06D]/35 text-[#493C39] hover:border-[#C88F98]'
+                      }`}
+                    >
+                      {wf.title[language]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Selected Workflow Card */}
+              <div className="bg-white border border-[#BEA06D]/40 rounded-2xl p-4 sm:p-5 space-y-3.5 soft-fade-up">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <h4 className="font-display text-lg sm:text-xl font-bold text-[#493C39] leading-snug">
+                      {activeWorkflow.title[language]}
+                    </h4>
+                    <p className="text-sm text-[#493C39]/85 leading-relaxed">
+                      {activeWorkflow.summary[language]}
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold tabular-nums text-[#4A6347] shrink-0">
+                    {wfCompletedCount}/{wfTotal}
+                  </span>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="w-full h-2 bg-[#FCF9F5] border border-[#BEA06D]/25 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#4A6347] rounded-full transition-all duration-500"
+                    style={{ width: `${wfPct}%` }}
+                  />
+                </div>
+
+                {/* Interactive Steps */}
+                <div className="space-y-2.5">
+                  {activeWorkflow.steps.map((step, idx) => {
+                    const done = !!completedStepIds[step.id];
+                    return (
                       <div
-                        key={msg.id}
-                        className={`flex flex-col ${
-                          msg.sender === 'user' ? 'items-end' : 'items-start'
+                        key={step.id}
+                        className={`p-3.5 rounded-xl border transition-all space-y-2 ${
+                          done
+                            ? 'bg-[#A2B29B]/14 border-[#4A6347]/50'
+                            : 'bg-[#FCF9F5] border-[#BEA06D]/25'
                         }`}
                       >
-                        <div
-                          className={`max-w-[92%] rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed shadow-xs ${
-                            msg.sender === 'user'
-                              ? 'bg-[#BEA06D] text-white'
-                              : msg.sender === 'error'
-                              ? 'bg-red-50 border border-red-200 text-red-900'
-                              : 'bg-white border border-[#BEA06D]/30 text-[#493C39]'
-                          }`}
-                        >
-                          {msg.sender === 'assistant' && msg.id !== `welcome-${language}-${resetSignal}` && msg.id !== 'welcome' && (
-                            <div className="mb-2">
+                        <div className="flex items-start gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleGuidedStep(step.id)}
+                            className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 cursor-pointer transition-colors ${
+                              done
+                                ? 'bg-[#4A6347] border-[#4A6347] text-white check-pop'
+                                : 'bg-white border-[#BEA06D]/60 text-transparent'
+                            }`}
+                            aria-label={`Mark step ${idx + 1} completed`}
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <div className="flex-1">
+                            <span
+                              className={`text-sm font-bold block ${
+                                done ? 'line-through text-[#493C39]/60' : 'text-[#493C39]'
+                              }`}
+                            >
+                              {idx + 1}. {step.label[language]}
+                            </span>
+                            <p className="text-xs sm:text-sm text-[#493C39]/80 mt-0.5 leading-relaxed">
+                              {step.detail[language]}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end">
+                          {step.opensSearch && onOpenSearch ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onToggleOpen(false);
+                                onOpenSearch();
+                              }}
+                              className="compact-chip py-1.5 px-3.5 rounded-full bg-white border border-[#BEA06D]/45 hover:border-[#C88F98] text-xs font-semibold text-[#8A6D3F] inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Search className="w-3.5 h-3.5" />
+                              <span>{step.actionLabel?.[language] || 'Open Smart Search'}</span>
+                            </button>
+                          ) : step.targetPage ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onPageChange(step.targetPage!);
+                                onToggleOpen(false);
+                              }}
+                              className="compact-chip py-1.5 px-3.5 rounded-full bg-[#BEA06D] hover:bg-[#8A6D3F] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>{step.actionLabel?.[language] || 'Open Feature'}</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Accomplishment Summary */}
+                {wfAllDone && (
+                  <div className="p-3.5 rounded-xl bg-[#A2B29B]/18 border border-[#4A6347]/60 space-y-2 soft-fade-up">
+                    <div className="flex items-center gap-2 text-xs font-bold text-[#4A6347] check-pop">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>
+                        {language === 'kn'
+                          ? 'ಮಾರ್ಗದರ್ಶಿ ಹಂತಗಳು ಪೂರ್ಣಗೊಂಡಿವೆ'
+                          : language === 'te'
+                          ? 'మార్గదర్శక దశలు పూర్తయ్యాయి'
+                          : 'Workflow Steps Completed'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#493C39]/85">
+                      {language === 'kn'
+                        ? `"${activeWorkflow.title[language]}" ಗಾಗಿ ಎಲ್ಲಾ ${wfTotal} ಹಂತಗಳನ್ನು ಪೂರ್ಣಗೊಳಿಸಿದ್ದೀರಿ. ಅಂತಿಮ ಸಾರಾಂಶಕ್ಕಾಗಿ ನನ್ನ ಆರೈಕೆ ಪಯಣ ನೋಡಿ.`
+                        : language === 'te'
+                        ? `"${activeWorkflow.title[language]}" కోసం ${wfTotal} దశలూ పూర్తి చేశారు. పూర్తి సారాంశం కోసం నా ఆరోగ్య ప్రయాణం చూడండి.`
+                        : `You walked through all ${wfTotal} organizational steps for "${activeWorkflow.title[language]}". Open My Care Journey to print your Visit Summary.`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPageChange('journey');
+                        onToggleOpen(false);
+                      }}
+                      className="compact-chip py-1.5 px-3 rounded-full bg-[#4A6347] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>
+                        {language === 'kn'
+                          ? 'ಭೇಟಿ ಸಾರಾಂಶ ನೋಡಿ'
+                          : language === 'te'
+                          ? 'విజిట్ సారాంశం చూడండి'
+                          : 'View Visit Summary'}
+                      </span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Gemini Natural-Language Guidance for Current Workflow */}
+              <div className="space-y-2.5">
+                <AiConsentNotice
+                  language={language}
+                  consentGranted={aiConsentGranted}
+                  onAcceptConsent={onAcceptAiConsent}
+                  compact
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    disabled={!aiConsentGranted || tipLoading}
+                    onClick={() => void handleGetGentleWorkflowTip(false)}
+                    className="compact-chip py-2 px-4 rounded-full bg-[#C88F98] hover:bg-[#b07680] disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>
+                      {language === 'kn'
+                        ? 'ಈ ಕೆಲಸಕ್ಕೆ ಸರಳ AI ಸಲಹೆ ಪಡೆಯಿರಿ'
+                        : language === 'te'
+                        ? 'ఈ పని కోసం సులభ AI సూచన పొందండి'
+                        : 'Get Gentle Gemini Tip for This Task'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenComfortMode();
+                      onToggleOpen(false);
+                    }}
+                    className="compact-chip text-xs font-semibold text-[#8A6D3F] underline cursor-pointer"
+                  >
+                    {language === 'kn'
+                      ? 'ಅನುಭವ ಸೆಟ್ಟಿಂಗ್‌ಗಳು'
+                      : language === 'te'
+                      ? 'కంఫర్ట్ సెట్టింగ్స్'
+                      : 'Experience Settings'}
+                  </button>
+                </div>
+
+                {tipLoading && (
+                  <AiSkeletonLoader
+                    label={
+                      language === 'kn'
+                        ? 'ಸರಳ ಭಾಷೆಯ ಸಲಹೆಯನ್ನು ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ...'
+                        : language === 'te'
+                        ? 'సులభ భాషా సూచన సిద్ధం అవుతోంది...'
+                        : 'Preparing plain-language step tip...'
+                    }
+                  />
+                )}
+
+                {tipError && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-900">
+                    {tipError}
+                  </div>
+                )}
+
+                {stepTip && !tipLoading && (
+                  <div className="p-4 rounded-2xl bg-white border border-[#BEA06D]/40 space-y-2.5 soft-fade-up">
+                    <AiTrustHeader
+                      language={language}
+                      label={
+                        language === 'kn'
+                          ? 'AI ಹಂತದ ಸಲಹೆ · Gemini'
+                          : language === 'te'
+                          ? 'AI దశ సూచన · Gemini'
+                          : 'AI Step Tip · Gemini'
+                      }
+                      onAskClarification={() => void handleGetGentleWorkflowTip(true)}
+                      onListen={() => speechService.speak(stepTip.text, language)}
+                      clarifyDisabled={tipLoading}
+                    />
+                    <FormattedAssistantMessage text={stepTip.text} />
+                    <AiTrustFooter language={language} uncertaintyNote={stepTip.safety} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* MODE 2: SPACIOUS CONVERSATIONAL GEMINI AI COMPANION */
+            <>
+              {/* Independently Scrollable Conversation Area */}
+              <div
+                ref={scrollContainerRef}
+                onScroll={handleMessagesScroll}
+                className="relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 sm:px-6 sm:py-5 space-y-4 bg-[#FCF9F5]"
+              >
+                {/* Show consent prompt clearly inside flow only until accepted */}
+                {!aiConsentGranted && (
+                  <AiConsentNotice
+                    language={language}
+                    consentGranted={aiConsentGranted}
+                    onAcceptConsent={onAcceptAiConsent}
+                    compact
+                  />
+                )}
+
+                {messages.map((msg, index) => {
+                  const isLatest = index === latestMessageIndex;
+                  return (
+                    <div
+                      key={msg.id}
+                      ref={isLatest ? latestMessageStartRef : undefined}
+                      className={`flex flex-col ${
+                        msg.sender === 'user' ? 'items-end' : 'items-start'
+                      }`}
+                    >
+                      <div
+                        className={`rounded-2xl shadow-xs break-words ${
+                          msg.sender === 'user'
+                            ? 'max-w-[88%] sm:max-w-[82%] px-4 py-3 sm:px-5 sm:py-3.5 bg-[#5B4944] text-white rounded-br-md'
+                            : msg.sender === 'error'
+                            ? 'w-full max-w-[96%] px-4 py-3.5 sm:px-5 sm:py-4 bg-red-50 border border-red-200 text-red-950 rounded-bl-md'
+                            : 'w-full max-w-[98%] sm:max-w-[94%] px-4 py-4 sm:px-6 sm:py-5 bg-white border border-[#BEA06D]/35 text-[#322826] rounded-bl-md'
+                        }`}
+                      >
+                        {msg.sender === 'assistant' &&
+                          msg.id !== `welcome-${language}-${resetSignal}` &&
+                          msg.id !== 'welcome' && (
+                            <div className="mb-3">
                               <AiTrustHeader
                                 language={language}
                                 label={
@@ -1326,203 +1669,268 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                             </div>
                           )}
 
-                          {msg.sender === 'error' && (
-                            <div className="flex items-center gap-1.5 font-bold text-xs mb-1 text-red-700">
-                              <AlertCircle className="w-4 h-4" />
-                              <span>
-                                {language === 'kn'
-                                  ? 'AI ಸೇವಾ ಸೂಚನೆ'
-                                  : language === 'te'
-                                  ? 'AI సేవా గమనిక'
-                                  : 'AI Service Notice'}
-                              </span>
-                            </div>
-                          )}
+                        {msg.sender === 'error' && (
+                          <div className="flex items-center gap-1.5 font-bold text-xs mb-1.5 text-red-700">
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            <span>
+                              {language === 'kn'
+                                ? 'AI ಸೇವಾ ಸೂಚನೆ'
+                                : language === 'te'
+                                ? 'AI సేవా గమనిక'
+                                : 'AI Service Notice'}
+                            </span>
+                          </div>
+                        )}
 
-                          <p className="whitespace-pre-line">{msg.text}</p>
+                        {msg.sender === 'assistant' ? (
+                          <FormattedAssistantMessage text={msg.text} />
+                        ) : (
+                          <p
+                            className={`whitespace-pre-line text-[15.5px] sm:text-[16.5px] leading-[1.6] ${
+                              msg.sender === 'user' ? 'text-white' : 'text-red-950'
+                            }`}
+                          >
+                            {msg.text}
+                          </p>
+                        )}
 
-                          {msg.followUpQuestion && (
+                        {msg.followUpQuestion && (
+                          <button
+                            type="button"
+                            disabled={!aiConsentGranted || isLoading}
+                            onClick={() => void sendMessageToGemini(msg.followUpQuestion!)}
+                            className="mt-3.5 text-left text-sm text-[#6E542D] bg-[#FCF9F5] border border-[#BEA06D]/45 hover:border-[#C88F98] px-3.5 py-2.5 rounded-xl block w-full cursor-pointer transition-colors leading-snug"
+                          >
+                            {msg.followUpQuestion}
+                          </button>
+                        )}
+
+                        {msg.safetyNotice && (
+                          <p className="mt-3 text-xs text-[#493C39]/80 italic border-t border-[#E6C1C4]/50 pt-2 leading-relaxed">
+                            {msg.safetyNotice}
+                          </p>
+                        )}
+
+                        {msg.sender === 'assistant' && (
+                          <div className="flex flex-wrap items-center gap-2 mt-3.5 pt-2.5 border-t border-[#BEA06D]/15">
                             <button
                               type="button"
-                              disabled={!aiConsentGranted || isLoading}
-                              onClick={() => void sendMessageToGemini(msg.followUpQuestion!)}
-                              className="mt-2.5 text-left text-xs text-[#8A6D3F] bg-[#FCF9F5] border border-[#BEA06D]/35 hover:border-[#C88F98] px-3 py-1.5 rounded-xl block w-full cursor-pointer transition-colors"
+                              onClick={() => speechService.speak(msg.text, language)}
+                              className="compact-chip px-3 py-1.5 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#8A6D3F] hover:bg-[#E6C1C4]/20 inline-flex items-center gap-1.5 cursor-pointer"
                             >
-                              {msg.followUpQuestion}
+                              <Volume2 className="w-3.5 h-3.5" />
+                              <span>{language === 'kn' ? 'ಕೇಳಿ' : language === 'te' ? 'వినండి' : 'Listen'}</span>
                             </button>
-                          )}
 
-                          {msg.safetyNotice && (
-                            <p className="mt-2 text-[11px] text-[#493C39]/75 italic border-t border-[#E6C1C4]/50 pt-1.5">
-                              {msg.safetyNotice}
-                            </p>
-                          )}
-
-                          {msg.sender === 'assistant' && (
-                            <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2 border-t border-[#BEA06D]/15">
+                            {msg.suggestedPage && (
                               <button
                                 type="button"
-                                onClick={() => speechService.speak(msg.text, language)}
-                                className="compact-chip px-2.5 py-1 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/35 text-[11px] font-semibold text-[#8A6D3F] hover:bg-[#E6C1C4]/20 inline-flex items-center gap-1 cursor-pointer"
+                                onClick={() => {
+                                  onPageChange(msg.suggestedPage!);
+                                  onToggleOpen(false);
+                                }}
+                                className="compact-chip px-3.5 py-1.5 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                               >
-                                <Volume2 className="w-3 h-3" />
-                                <span>{language === 'kn' ? 'ಕೇಳಿ' : language === 'te' ? 'వినండి' : 'Listen'}</span>
+                                <span>{msg.suggestedActionLabel || activePageCtx.title[language]}</span>
+                                <ArrowRight className="w-3.5 h-3.5" />
                               </button>
+                            )}
+                          </div>
+                        )}
 
-                              {msg.suggestedPage && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onPageChange(msg.suggestedPage!);
-                                    onToggleOpen(false);
-                                  }}
-                                  className="compact-chip px-3 py-1 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                                >
-                                  <span>{msg.suggestedActionLabel || activePageCtx.title[language]}</span>
-                                  <ArrowRight className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
-                          )}
-
-                          {msg.sender === 'error' && lastFailedPrompt && (
-                            <button
-                              type="button"
-                              onClick={() => void sendMessageToGemini(lastFailedPrompt)}
-                              className="mt-2 text-xs font-bold text-red-800 underline cursor-pointer"
-                            >
-                              {language === 'kn' ? 'ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ' : language === 'te' ? 'మళ్ళీ ప్రయత్నించండి' : 'Retry'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    {isLoading && (
-                      <AiSkeletonLoader
-                        label={
-                          language === 'kn'
-                            ? 'CORE AI ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ...'
-                            : language === 'te'
-                            ? 'CORE AI సమాధానం సిద్ధం చేస్తోంది...'
-                            : 'CORE AI is composing a gentle response...'
-                        }
-                      />
-                    )}
-                    <div ref={endRef} />
-                  </div>
-
-                  {/* Contextual Starter Prompts */}
-                  <div className="bg-white border-t border-[#BEA06D]/20 px-4 pt-3 pb-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-[#8A6D3F] uppercase tracking-wider">
-                        {language === 'kn'
-                          ? 'ಈ ಪುಟಕ್ಕೆ ಸಂಬಂಧಿಸಿದ ಪ್ರಶ್ನೆಗಳು'
-                          : language === 'te'
-                          ? 'ఈ స్క్రీన్ కోసం సూచన ప్రశ్నలు'
-                          : `Suggested for ${activePageCtx.title.en}`}
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onOpenComfortMode();
-                            onToggleOpen(false);
-                          }}
-                          className="compact-chip text-[11px] font-semibold text-[#8A6D3F] underline hover:text-[#493C39] cursor-pointer"
-                        >
-                          {language === 'kn' ? 'ಸೆಟ್ಟಿಂಗ್‌ಗಳು' : language === 'te' ? 'సెట్టింగ్స్' : 'Settings'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onPageChange('help');
-                            onToggleOpen(false);
-                          }}
-                          className="compact-chip text-[11px] font-semibold text-[#C88F98] hover:text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <HelpCircle className="w-3 h-3" />
-                          <span>{language === 'kn' ? 'ಸಹಾಯ' : language === 'te' ? 'సహాయం' : 'Get Help'}</span>
-                        </button>
+                        {msg.sender === 'error' && lastFailedPrompt && (
+                          <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => void sendMessageToGemini(lastFailedPrompt, { isRetry: true })}
+                            className="mt-2.5 text-sm font-bold text-red-800 underline disabled:opacity-50 cursor-pointer"
+                          >
+                            {language === 'kn' ? 'ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ' : language === 'te' ? 'మళ్ళీ ప్రయత్నించండి' : 'Retry'}
+                          </button>
+                        )}
                       </div>
                     </div>
+                  );
+                })}
 
-                    <div className="flex flex-wrap gap-1.5">
+                {isLoading && (
+                  <AiSkeletonLoader
+                    label={
+                      language === 'kn'
+                        ? 'CORE AI ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ...'
+                        : language === 'te'
+                        ? 'CORE AI సమాధానం సిద్ధం చేస్తోంది...'
+                        : 'CORE AI is composing a gentle response...'
+                    }
+                  />
+                )}
+
+                {showScrollToBottom && (
+                  <div className="sticky bottom-2 flex justify-end pointer-events-none">
+                    <button
+                      type="button"
+                      onClick={() => scrollToBottom(true)}
+                      className="pointer-events-auto compact-chip px-3 py-1.5 rounded-full bg-[#493C39]/90 hover:bg-[#493C39] text-white text-xs font-semibold shadow-md inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                      <span>
+                        {language === 'kn' ? 'ಹೊಸ ಉತ್ತರ' : language === 'te' ? 'కొత్త సందేశం' : 'Latest'}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Compact Bottom Composer & Collapsible Suggestions */}
+              <div className="shrink-0 bg-white border-t border-[#BEA06D]/25">
+                {/* Collapsible Suggestions Header Strip */}
+                <div className="px-3.5 sm:px-5 py-1.5 border-b border-[#BEA06D]/15 bg-[#FCF9F5]/75 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSuggestionsOpen((s) => !s)}
+                    aria-expanded={suggestionsOpen}
+                    className="compact-chip py-1 px-2 rounded-lg text-xs font-semibold text-[#8A6D3F] hover:text-[#493C39] hover:bg-[#E6C1C4]/20 inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
+                    <span>
+                      {language === 'kn'
+                        ? 'ಸೂಚಿಸಿದ ಪ್ರಶ್ನೆಗಳು'
+                        : language === 'te'
+                        ? 'సూచించిన ప్రశ్నలు'
+                        : 'Suggestions'}
+                    </span>
+                    <span className="text-[11px] text-[#493C39]/65 tabular-nums">
+                      ({activePageCtx.prompts.length})
+                    </span>
+                    {suggestionsOpen ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+
+                  <span className="text-[11px] text-[#493C39]/70 truncate">
+                    {language === 'kn'
+                      ? 'AI ಮಾರ್ಗದರ್ಶಿ · ವೈದ್ಯರಲ್ಲ'
+                      : language === 'te'
+                      ? 'AI గైడ్ · డాక్టర్ కాదు'
+                      : 'AI Guide · Verify clinical care with staff'}
+                  </span>
+                </div>
+
+                {/* Expandable Suggestions Drawer */}
+                <div className="graceful-expand" data-open={suggestionsOpen ? 'true' : 'false'}>
+                  <div>
+                    <div className="px-3.5 sm:px-5 py-2.5 bg-[#FCF9F5]/50 border-b border-[#BEA06D]/15 flex flex-wrap gap-2">
                       {activePageCtx.prompts.map((promptObj, idx) => (
                         <button
                           key={`${currentPage}-ctx-${idx}`}
                           type="button"
                           disabled={!aiConsentGranted || isLoading}
                           onClick={() => void sendMessageToGemini(promptObj[language])}
-                          className="compact-chip text-left text-[11px] px-2.5 py-1.5 rounded-xl bg-[#FCF9F5] hover:bg-[#E6C1C4]/25 disabled:opacity-50 border border-[#BEA06D]/30 text-[#493C39] font-medium transition-colors cursor-pointer"
+                          className="compact-chip text-left text-xs sm:text-[13px] px-3 py-1.5 rounded-xl bg-white hover:bg-[#E6C1C4]/20 disabled:opacity-50 border border-[#BEA06D]/35 text-[#493C39] font-medium transition-colors cursor-pointer"
                         >
                           {promptObj[language]}
                         </button>
                       ))}
                     </div>
                   </div>
+                </div>
 
-                  {/* Text Input */}
-                  <form
-                    onSubmit={handleSubmit}
-                    className="bg-white border-t border-[#BEA06D]/20 p-3 flex items-center gap-2"
-                  >
-                    <input
-                      type="text"
-                      maxLength={1200}
-                      disabled={!aiConsentGranted || isLoading}
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      placeholder={
-                        !aiConsentGranted
-                          ? language === 'kn'
-                            ? 'ಮೊದಲು ಮೇಲಿನ AI ಸಮ್ಮತಿಯನ್ನು ಒಪ್ಪಿಕೊಳ್ಳಿ...'
-                            : language === 'te'
-                            ? 'ముందుగా పైన AI అనుమతిని ఆమోదించండి...'
-                            : 'Accept AI consent above to ask...'
-                          : language === 'kn'
-                          ? 'ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ...'
+                {/* Message Composer Input */}
+                <form
+                  onSubmit={handleSubmit}
+                  className="px-3.5 py-2.5 sm:px-4 sm:py-3 flex items-end gap-2 pb-[max(0.625rem,env(safe-area-inset-bottom))]"
+                >
+                  <textarea
+                    ref={textareaRef}
+                    rows={1}
+                    maxLength={1200}
+                    disabled={!aiConsentGranted || isLoading}
+                    value={inputText}
+                    onChange={handleTextareaChange}
+                    onKeyDown={handleTextareaKeyDown}
+                    placeholder={
+                      !aiConsentGranted
+                        ? language === 'kn'
+                          ? 'ಮೊದಲು ಮೇಲಿನ AI ಸಮ್ಮತಿಯನ್ನು ಒಪ್ಪಿಕೊಳ್ಳಿ...'
                           : language === 'te'
-                          ? 'మీ ప్రశ్నను టైప్ చేయండి...'
-                          : 'Ask about navigation, visit prep, or terms...'
-                      }
-                      className="flex-1 px-3.5 py-2.5 rounded-xl border border-[#BEA06D]/35 bg-[#FCF9F5] text-xs sm:text-sm text-[#493C39] focus:outline-none focus:ring-2 focus:ring-[#BEA06D] disabled:opacity-60"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!aiConsentGranted || isLoading || !inputText.trim()}
-                      className="compact-chip p-2.5 rounded-xl bg-[#C88F98] hover:bg-[#b27882] disabled:opacity-50 text-white transition-colors cursor-pointer"
-                      aria-label="Send message to AI Companion"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </form>
-                </>
-              )}
+                          ? 'ముందుగా పైన AI అనుమతిని ఆమోదించండి...'
+                          : 'Accept AI consent above to ask...'
+                        : language === 'kn'
+                        ? 'ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ...'
+                        : language === 'te'
+                        ? 'మీ ప్రశ్నను టైప్ చేయండి...'
+                        : 'Ask about navigation, visit prep, or terms...'
+                    }
+                    className="flex-1 min-h-[44px] max-h-[108px] resize-none px-3.5 py-2.5 rounded-xl border border-[#BEA06D]/45 bg-[#FCF9F5] text-base text-[#322826] leading-snug focus:outline-none focus:ring-2 focus:ring-[#BEA06D] disabled:opacity-60"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!aiConsentGranted || isLoading || !inputText.trim()}
+                    className="compact-chip min-w-[44px] min-h-[44px] p-2.5 rounded-xl bg-[#C88F98] hover:bg-[#b27882] disabled:opacity-50 text-white inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                    aria-label="Send message to AI Companion"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
             </>
           )}
         </div>
       )}
 
-      {/* Floating Rosewater Trigger Button */}
-      <button
-        type="button"
-        onClick={() => {
-          onToggleOpen(!isOpen);
-          setIsMinimized(false);
-        }}
-        className="flex items-center gap-2.5 bg-[#493C39] hover:bg-[#C88F98] active:scale-95 text-white font-semibold py-3 px-5 rounded-full shadow-lg border border-[#BEA06D]/70 transition-all duration-300 cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#BEA06D]/40"
-        aria-label="Open CORE AI Companion"
-      >
-        <MessageCircleHeart className="w-5 h-5 text-[#E6C1C4] shrink-0" />
-        <span className="text-xs sm:text-sm">
-          {language === 'kn'
-            ? 'CORE ಸಹಾಯಕ & ಮಾರ್ಗದರ್ಶಿ'
-            : language === 'te'
-            ? 'CORE సహాయకుడు & గైడ్'
-            : 'CORE Companion & Guide'}
-        </span>
-      </button>
-    </div>
+      {/* Compact Minimized Bar or Closed Floating Trigger */}
+      {(!isOpen || isMinimized) && (
+        <div className="fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-40 no-print flex items-center gap-2">
+          {isOpen && isMinimized ? (
+            <div className="bg-white border border-[#BEA06D]/70 rounded-full shadow-lg px-3.5 py-2 flex items-center gap-2.5 modal-soft-enter">
+              <CoreMonogramMark size="sm" />
+              <button
+                type="button"
+                onClick={() => setIsMinimized(false)}
+                className="compact-chip text-xs sm:text-sm font-semibold text-[#493C39] hover:text-[#8A6D3F] cursor-pointer pr-1"
+              >
+                {language === 'kn'
+                  ? 'CORE AI ತೆರೆಯಿರಿ'
+                  : language === 'te'
+                  ? 'CORE AI తెరవండి'
+                  : 'Restore CORE Companion'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMinimized(false);
+                  onToggleOpen(false);
+                }}
+                className="compact-chip p-1.5 rounded-full text-[#493C39]/70 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 cursor-pointer"
+                aria-label="Close Companion"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                onToggleOpen(true);
+                setIsMinimized(false);
+              }}
+              className="flex items-center gap-2.5 bg-[#493C39] hover:bg-[#C88F98] active:scale-95 text-white font-semibold py-3 px-5 rounded-full shadow-lg border border-[#BEA06D]/70 transition-all duration-300 cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#BEA06D]/40"
+              aria-label="Open CORE AI Companion"
+            >
+              <MessageCircleHeart className="w-5 h-5 text-[#E6C1C4] shrink-0" />
+              <span className="text-xs sm:text-sm">
+                {language === 'kn'
+                  ? 'CORE ಸಹಾಯಕ & ಮಾರ್ಗದರ್ಶಿ'
+                  : language === 'te'
+                  ? 'CORE సహాయకుడు & గైడ్'
+                  : 'CORE Companion & Guide'}
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
 };
