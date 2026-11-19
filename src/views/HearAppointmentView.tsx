@@ -29,6 +29,7 @@ interface HearAppointmentViewProps {
   onSelectAppointment: (apt: Appointment) => void;
   completedTasks: Record<string, boolean>;
   onToggleTask: (taskId: string) => void;
+  aiConsentGranted?: boolean;
 }
 
 export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
@@ -40,6 +41,7 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
   onSelectAppointment,
   completedTasks,
   onToggleTask,
+  aiConsentGranted = false,
 }) => {
   const t = TRANSLATIONS[currentLanguage];
   const [searchInput, setSearchInput] = useState('');
@@ -181,6 +183,7 @@ export const HearAppointmentView: React.FC<HearAppointmentViewProps> = ({
           <AudioPlayer
             textToSpeak={getFullSpokenText()}
             language={currentLanguage}
+            cloudConsentGranted={aiConsentGranted}
           />
         </div>
 

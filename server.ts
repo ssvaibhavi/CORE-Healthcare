@@ -6,11 +6,13 @@ import { fileURLToPath } from 'url';
 import {
   checkRateLimit,
   getLastAiDiagnostic,
+  getTtsCapabilities,
   mapGeminiError,
   runClarityAi,
   runCompanionAi,
   runSmartJourneyAi,
   runTranslateAi,
+  runTtsAi,
 } from './server/geminiService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,11 +31,14 @@ async function startServer() {
     const keyConfigured =
       Boolean(process.env.GEMINI_API_KEY?.trim()) &&
       process.env.GEMINI_API_KEY?.trim() !== 'MY_GEMINI_API_KEY';
+    const ttsCaps = getTtsCapabilities();
 
     res.json({
       ok: true,
       service: 'CORE Rosewater API',
       aiConfigured: keyConfigured,
+      ttsConfigured: ttsCaps.cloudTtsConfigured,
+      ttsProviders: ttsCaps.providers,
       lastAiDiagnostic: getLastAiDiagnostic(),
     });
   });
@@ -111,6 +116,26 @@ async function startServer() {
 
     try {
       const result = await runTranslateAi(req.body ?? {});
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const mapped = mapGeminiError(err);
+      res.status(mapped.status).json({ error: mapped.code, message: mapped.message });
+    }
+  });
+
+  app.post('/api/ai/tts', async (req, res) => {
+    const clientIp = req.ip || 'local';
+    const limit = checkRateLimit(clientIp);
+    if (!limit.allowed) {
+      res.status(429).json({
+        error: 'RATE_LIMITED',
+        message: `Too many speech requests. Please wait ${limit.retryAfterSec} seconds and try again.`,
+      });
+      return;
+    }
+
+    try {
+      const result = await runTtsAi(req.body ?? {});
       res.json({ ok: true, data: result });
     } catch (err) {
       const mapped = mapGeminiError(err);

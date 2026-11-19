@@ -9,7 +9,14 @@ import {
   getScriptFontClass,
   getSpeechRecognitionLocale,
 } from '../utils/languageIntelligence';
-import { LanguageVoiceSupport, speechService, SpeechPlaybackSnapshot } from '../utils/speech';
+import {
+  getAudioLanguageBadge,
+  LanguageVoiceSupport,
+  resolveSpeechLanguage,
+  speechService,
+  SpeechPlaybackSnapshot,
+  SpeechRate,
+} from '../utils/speech';
 import {
   ArrowLeft,
   ArrowRight,
@@ -80,6 +87,7 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
   const [lastSpokenLang, setLastSpokenLang] = useState<Language>(currentLanguage);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [voiceComplexity, setVoiceComplexity] = useState<ExplanationComplexity>(complexity);
+  const [speechRate, setSpeechRate] = useState<SpeechRate>(0.9);
 
   const [languageSupport, setLanguageSupport] = useState<Record<Language, LanguageVoiceSupport>>(() =>
     speechService.getAllLanguagesVoiceSupport()
@@ -126,13 +134,17 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
       setLanguageSupport(speechService.getAllLanguagesVoiceSupport());
     };
     refreshSupport();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = refreshSupport;
-    }
-    const unsub = speechService.subscribe((snap) => setPlaybackSnap(snap));
+    const unsubVoices = speechService.subscribeVoices(refreshSupport);
+    const unsub = speechService.subscribe((snap) => {
+      setPlaybackSnap(snap);
+      if (snap.lastError) {
+        setRecognitionNotice(snap.lastError.message);
+      }
+    });
 
     return () => {
       unsub();
+      unsubVoices();
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
@@ -164,23 +176,33 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
     : 'idle';
 
   const speakResponse = (text: string, lang: Language, itemId: string) => {
+    const audioLang = resolveSpeechLanguage(text, lang);
     setLastSpokenText(text);
-    setLastSpokenLang(lang);
+    setLastSpokenLang(audioLang);
+    setRecognitionNotice(null);
+    speechService.clearError();
     speechService.speak(
       text,
-      lang,
+      audioLang,
       {
-        onError: (reason) => {
+        onError: (_reason, info) => {
           setRecognitionNotice(
-            reason === 'unsupported'
-              ? 'Text-to-Speech is not supported in this browser.'
-              : `No voice playback output succeeded for ${getLanguageShortName(lang)} on this device. You can read the text above.`
+            info?.message ||
+              `No voice playback output succeeded for ${getAudioLanguageBadge(audioLang)} on this device. You can read the text above.`
           );
         },
       },
-      0.95,
-      itemId
+      {
+        rate: speechRate,
+        itemId,
+        cloudConsentGranted: aiConsentGranted,
+      }
     );
+  };
+
+  const handleSpeedChange = (nextRate: SpeechRate) => {
+    setSpeechRate(nextRate);
+    speechService.setRate(nextRate);
   };
 
   const handleSendToGemini = async (rawQuery: string) => {
@@ -542,6 +564,8 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
                     >
                       {sup.nativeTtsVoiceAvailable
                         ? `Available (${sup.ttsVoiceName?.slice(0, 22)})`
+                        : sup.cloudTtsAvailable
+                        ? 'Cloud Audio Ready'
                         : sup.ttsApiAvailable
                         ? 'No OS Voice Pack Detected'
                         : 'TTS Unsupported'}
@@ -617,18 +641,14 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
                     ? 'Gemini సమాధానం సిద్ధం చేస్తోంది...'
                     : 'Thinking... Composing gentle response'
                   : visualState === 'speaking'
-                  ? currentLanguage === 'kn'
-                    ? 'ಉತ್ತರವನ್ನು ಧ್ವನಿಯಲ್ಲಿ ಓದುತ್ತಿದೆ...'
-                    : currentLanguage === 'te'
-                    ? 'సమాధానం చదువుతోంది...'
-                    : `Speaking in ${getLanguageShortName(lastSpokenLang)}...`
+                  ? `Speaking (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})`
                   : visualState === 'paused'
-                  ? 'Audio playback paused'
+                  ? `Audio paused (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})`
                   : currentLanguage === 'kn'
-                  ? 'ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ'
+                  ? `ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ (${getAudioLanguageBadge(currentLanguage)})`
                   : currentLanguage === 'te'
-                  ? 'మాట్లాడటానికి మైక్ నొక్కండి లేదా క్రింద టైప్ చేయండి'
-                  : 'Tap microphone to speak, or type below'}
+                  ? `మాట్లాడటానికి మైక్ నొక్కండి లేదా క్రింద టైప్ చేయండి (${getAudioLanguageBadge(currentLanguage)})`
+                  : `Tap microphone to speak, or type below (${getAudioLanguageBadge(currentLanguage)})`}
               </div>
 
               {/* Soft Waveform Animation (Active during Listening or Speaking, static when reduceMotion) */}
@@ -757,18 +777,43 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setAutoSpeakReplies((v) => !v)}
-            className={`compact-chip px-3 py-1.5 rounded-xl border font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
-              autoSpeakReplies
-                ? 'bg-[#A2B29B]/20 border-[#4A6347]/45 text-[#4A6347]'
-                : 'bg-[#FCF9F5] border-[#BEA06D]/30 text-[#493C39]/75'
-            }`}
-          >
-            {autoSpeakReplies ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-            <span>{autoSpeakReplies ? 'Auto-Speak Replies: On' : 'Auto-Speak Replies: Off'}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Playback Speed Selector (0.75x / 0.9x / 1.0x) */}
+            <div
+              className="inline-flex items-center bg-[#FCF9F5] border border-[#BEA06D]/30 rounded-xl p-0.5"
+              role="group"
+              aria-label="Audio playback speed"
+            >
+              <span className="px-2 text-[11px] font-semibold text-[#8A6D3F]">Speed:</span>
+              {([0.75, 0.9, 1.0] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => handleSpeedChange(r)}
+                  className={`compact-chip px-2 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                    speechRate === r
+                      ? 'bg-[#BEA06D] text-white'
+                      : 'text-[#493C39]/80 hover:text-[#493C39]'
+                  }`}
+                >
+                  {r === 1 ? '1.0x' : `${r}x`}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAutoSpeakReplies((v) => !v)}
+              className={`compact-chip px-3 py-1.5 rounded-xl border font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
+                autoSpeakReplies
+                  ? 'bg-[#A2B29B]/20 border-[#4A6347]/45 text-[#4A6347]'
+                  : 'bg-[#FCF9F5] border-[#BEA06D]/30 text-[#493C39]/75'
+              }`}
+            >
+              {autoSpeakReplies ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              <span>{autoSpeakReplies ? 'Auto-Speak Replies: On' : 'Auto-Speak Replies: Off'}</span>
+            </button>
+          </div>
         </div>
 
         {recognitionNotice && (

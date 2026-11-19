@@ -189,3 +189,57 @@ export function generateSmartJourneyAi(params: {
 }): Promise<SmartJourneyAiResponse> {
   return postAiEndpoint<SmartJourneyAiResponse>('/api/ai/smart-journey', params);
 }
+
+export interface TtsAiResponse {
+  audioBase64: string;
+  mimeType: string;
+  language: Language;
+  locale: 'en-IN' | 'kn-IN' | 'te-IN';
+  provider: 'google-cloud-tts' | 'gemini-tts';
+}
+
+export interface AiHealthStatus {
+  aiConfigured: boolean;
+  ttsConfigured: boolean;
+}
+
+let cachedHealthStatus: AiHealthStatus | null = null;
+let pendingHealthPromise: Promise<AiHealthStatus> | null = null;
+
+export async function fetchAiHealthStatus(forceRefresh = false): Promise<AiHealthStatus> {
+  if (!forceRefresh && cachedHealthStatus) {
+    return cachedHealthStatus;
+  }
+  if (!forceRefresh && pendingHealthPromise) {
+    return pendingHealthPromise;
+  }
+
+  pendingHealthPromise = (async () => {
+    try {
+      const res = await fetch('/api/health');
+      const json = await res.json().catch(() => ({}));
+      const status: AiHealthStatus = {
+        aiConfigured: Boolean(json?.aiConfigured),
+        ttsConfigured: Boolean(json?.ttsConfigured),
+      };
+      cachedHealthStatus = status;
+      return status;
+    } catch {
+      return cachedHealthStatus || { aiConfigured: false, ttsConfigured: false };
+    } finally {
+      pendingHealthPromise = null;
+    }
+  })();
+
+  return pendingHealthPromise;
+}
+
+export function synthesizeCloudSpeech(params: {
+  text: string;
+  language: Language;
+  rate?: number;
+  consentAccepted: boolean;
+}): Promise<TtsAiResponse> {
+  return postAiEndpoint<TtsAiResponse>('/api/ai/tts', params);
+}
+

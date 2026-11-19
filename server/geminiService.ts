@@ -895,3 +895,171 @@ export async function runTranslateAi(payload: TranslateRequestPayload) {
     verificationNote: parsed.verificationNote ? String(parsed.verificationNote) : undefined,
   };
 }
+
+export interface TtsCapabilities {
+  cloudTtsConfigured: boolean;
+  providers: Array<'google-cloud-tts' | 'gemini-tts'>;
+}
+
+export function getTtsCapabilities(): TtsCapabilities {
+  const providers: Array<'google-cloud-tts' | 'gemini-tts'> = [];
+  const gcloudKey = process.env.GOOGLE_CLOUD_TTS_API_KEY?.trim();
+  if (gcloudKey && gcloudKey !== 'MY_GOOGLE_CLOUD_TTS_API_KEY') {
+    providers.push('google-cloud-tts');
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (
+    process.env.ENABLE_GEMINI_TTS === 'true' &&
+    geminiKey &&
+    geminiKey !== 'MY_GEMINI_API_KEY'
+  ) {
+    providers.push('gemini-tts');
+  }
+
+  return {
+    cloudTtsConfigured: providers.length > 0,
+    providers,
+  };
+}
+
+export interface TtsRequestPayload {
+  text?: unknown;
+  language?: unknown;
+  rate?: unknown;
+  consentAccepted?: unknown;
+}
+
+function getLocaleForLanguage(lang: AiLanguage): 'en-IN' | 'kn-IN' | 'te-IN' {
+  if (lang === 'kn') return 'kn-IN';
+  if (lang === 'te') return 'te-IN';
+  return 'en-IN';
+}
+
+export async function runTtsAi(payload: TtsRequestPayload) {
+  validateConsent(payload.consentAccepted);
+
+  const text = sanitizeText(payload.text, 2400);
+  if (!text || text.length < 1) {
+    const err: AiServiceHttpError = {
+      status: 400,
+      code: 'EMPTY_TEXT',
+      message: 'Please provide text to synthesize.',
+    };
+    throw err;
+  }
+
+  const language = normalizeLanguage(payload.language);
+  const locale = getLocaleForLanguage(language);
+  const rawRate = typeof payload.rate === 'number' ? payload.rate : 0.95;
+  const speakingRate = Math.min(1.25, Math.max(0.75, rawRate));
+  const caps = getTtsCapabilities();
+
+  if (!caps.cloudTtsConfigured) {
+    const err: AiServiceHttpError = {
+      status: 503,
+      code: 'TTS_NOT_CONFIGURED',
+      message:
+        'Optional Cloud Text-to-Speech is not configured on the server. Set GOOGLE_CLOUD_TTS_API_KEY (or ENABLE_GEMINI_TTS=true) in server secrets to enable cloud speech when browser voices are absent.',
+    };
+    throw err;
+  }
+
+  if (caps.providers.includes('google-cloud-tts')) {
+    const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY!.trim();
+    const res = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(18_000),
+        body: JSON.stringify({
+          input: { text },
+          voice: {
+            languageCode: locale,
+            ssmlGender: 'FEMALE',
+          },
+          audioConfig: {
+            audioEncoding: 'MP3',
+            speakingRate,
+          },
+        }),
+      }
+    );
+
+    const data = (await res.json().catch(() => ({}))) as {
+      audioContent?: string;
+      error?: { message?: string; status?: string };
+    };
+
+    if (!res.ok || !data.audioContent) {
+      const err: AiServiceHttpError = {
+        status: res.status === 429 ? 429 : res.status >= 400 && res.status < 500 ? res.status : 502,
+        code: res.status === 429 ? 'TTS_RATE_LIMITED' : 'TTS_UPSTREAM_ERROR',
+        message:
+          data?.error?.message ||
+          `Cloud Text-to-Speech request failed for ${locale}.`,
+      };
+      throw err;
+    }
+
+    return {
+      audioBase64: data.audioContent,
+      mimeType: 'audio/mpeg',
+      language,
+      locale,
+      provider: 'google-cloud-tts' as const,
+    };
+  }
+
+  // Opt-in Gemini 3.8 Flash Lite TTS fallback
+  const ai = getGeminiClient();
+  const response = await callWithExponentialBackoff('tts', (abortSignal) =>
+    ai.models.generateContent({
+      model: 'gemini-3.8-flash-lite-tts',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text,
+              speechMetadata: {
+                style: `Calm, compassionate, clear healthcare guide speaking strictly in ${languageName(
+                  language
+                )} (${locale}) at a comfortable pace.`,
+              },
+            },
+          ],
+        },
+      ],
+      config: {
+        abortSignal,
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    })
+  );
+
+  const inline = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+  if (!inline?.data) {
+    const err: AiServiceHttpError = {
+      status: 502,
+      code: 'TTS_EMPTY_AUDIO',
+      message: `Cloud speech generation returned no audio for ${locale}.`,
+    };
+    throw err;
+  }
+
+  return {
+    audioBase64: inline.data,
+    mimeType: inline.mimeType || 'audio/wav',
+    language,
+    locale,
+    provider: 'gemini-tts' as const,
+  };
+}
+

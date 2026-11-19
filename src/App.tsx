@@ -37,7 +37,8 @@ import {
   PageView,
   ShowcaseProgress
 } from './types';
-import { speechService } from './utils/speech';
+import { speechService, SpeechErrorInfo } from './utils/speech';
+import { AlertCircle } from 'lucide-react';
 
 const DEFAULT_COMFORT_SETTINGS: ComfortSettings = {
   textSize: 'normal',
@@ -155,6 +156,13 @@ export default function App() {
   );
   const [sessionActionsCount, setSessionActionsCount] = useState<number>(0);
   const [demoResetSignal, setDemoResetSignal] = useState<number>(0);
+  const [globalAudioError, setGlobalAudioError] = useState<SpeechErrorInfo | null>(null);
+
+  useEffect(() => {
+    return speechService.subscribe((snap) => {
+      setGlobalAudioError(snap.lastError);
+    });
+  }, []);
 
   const effectiveMotionMode =
     comfortSettings.motionMode ?? (comfortSettings.reduceMotion ? 'none' : 'full');
@@ -413,6 +421,7 @@ export default function App() {
             onSelectAppointment={(apt) => setSelectedAppointment(apt)}
             completedTasks={completedTasks}
             onToggleTask={handleToggleTask}
+            aiConsentGranted={aiConsentGranted}
           />
         )}
 
@@ -634,6 +643,31 @@ export default function App() {
 
       {/* Offline Status Toast (shows only when browser reports offline) */}
       <OfflineIndicator language={currentLanguage} />
+
+      {/* Global Unavailable-Voice Notice for quick Listen buttons on pages without inline audio banners */}
+      {globalAudioError &&
+        !companionOpen &&
+        currentPage !== 'appointment' &&
+        currentPage !== 'clarity' &&
+        currentPage !== 'voicebridge' && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-md z-40 no-print bg-[#FCF9F5] border border-[#C88F98] rounded-2xl shadow-lg p-3.5 flex items-start justify-between gap-3 text-xs text-[#493C39] modal-soft-enter"
+          >
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{globalAudioError.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => speechService.clearError()}
+              className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
+            >
+              {currentLanguage === 'kn' ? 'ಮುಚ್ಚಿ' : currentLanguage === 'te' ? 'మూసివేయండి' : 'Dismiss'}
+            </button>
+          </div>
+        )}
 
       {/* Universal CORE Smart Search Overlay */}
       <SmartSearchModal

@@ -10,7 +10,13 @@ import {
   getScriptFontClass,
   getSpeechRecognitionLocale,
 } from '../utils/languageIntelligence';
-import { speechService, SpeechPlaybackSnapshot } from '../utils/speech';
+import {
+  getAudioLanguageBadge,
+  resolveSpeechLanguage,
+  speechService,
+  SpeechPlaybackSnapshot,
+  SpeechRate,
+} from '../utils/speech';
 import {
   MessageCircleHeart,
   X,
@@ -43,6 +49,7 @@ import {
   Zap,
   FileText,
   SquarePen,
+  Loader2,
 } from 'lucide-react';
 
 interface MessageTranslation {
@@ -861,6 +868,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   // Voice dictation & TTS state
   const [isListening, setIsListening] = useState(false);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string | null>(null);
+  const [speechRate, setSpeechRate] = useState<SpeechRate>(0.9);
   const [playbackSnap, setPlaybackSnap] = useState<SpeechPlaybackSnapshot>(() =>
     speechService.getPlaybackSnapshot()
   );
@@ -923,9 +931,21 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
     }
   }, [resetSignal, language]);
 
-  // Subscribe to speech playback state
+  // Subscribe to speech playback state and async browser voice changes
   useEffect(() => {
-    return speechService.subscribe((snap) => setPlaybackSnap(snap));
+    const unsub = speechService.subscribe((snap) => {
+      setPlaybackSnap(snap);
+      if (snap.lastError) {
+        setVoiceStatusMessage(snap.lastError.message);
+      }
+    });
+    const unsubVoices = speechService.subscribeVoices(() => {
+      // Keep snapshot voice availability fresh when async voices finish loading
+    });
+    return () => {
+      unsub();
+      unsubVoices();
+    };
   }, []);
 
   // Cleanup active mic on close/unmount
@@ -1397,21 +1417,30 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       return;
     }
     setVoiceStatusMessage(null);
+    speechService.clearError();
+    const audioLang = resolveSpeechLanguage(text, lang);
     speechService.speak(
       text,
-      lang,
+      audioLang,
       {
-        onError: (reason) => {
+        onError: (_reason, info) => {
           setVoiceStatusMessage(
-            reason === 'unsupported'
-              ? 'Text-to-Speech is not supported in this browser.'
-              : `Browser voice playback is unavailable for ${getLanguageShortName(lang)} on this device.`
+            info?.message ||
+              `Browser voice playback is unavailable for ${getAudioLanguageBadge(audioLang)} on this device.`
           );
         },
       },
-      0.95,
-      itemId
+      {
+        rate: speechRate,
+        itemId,
+        cloudConsentGranted: aiConsentGranted,
+      }
     );
+  };
+
+  const handleSpeechRateChange = (nextRate: SpeechRate) => {
+    setSpeechRate(nextRate);
+    speechService.setRate(nextRate);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -2041,7 +2070,10 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                     msg.sender === 'assistant' &&
                     msg.id !== 'welcome' &&
                     !msg.id.startsWith('welcome-');
-                  const msgLang = msg.responseLanguage || chatLanguage;
+                  const msgLang = resolveSpeechLanguage(
+                    msg.text,
+                    msg.responseLanguage || chatLanguage
+                  );
                   const msgFontClass = getScriptFontClass(msg.text, msgLang);
                   const isPlayingOriginal =
                     playbackSnap.activeId === msg.id && playbackSnap.status !== 'idle';
@@ -2510,46 +2542,77 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
               {/* Compact Bottom Composer, Voice Playback/Listening Bar & Collapsible Suggestions */}
               <div className="shrink-0 bg-white border-t border-[#BEA06D]/25">
-                {/* Active TTS Playback Bar (Pause / Resume / Replay / Stop Audio) */}
+                {/* Active TTS Playback Bar (Language badge + Pause / Resume / Replay / Stop / Speed) */}
                 {playbackSnap.status !== 'idle' && (
                   <div className="px-3.5 sm:px-5 py-2 bg-[#FCF9F5] border-b border-[#BEA06D]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2 text-[#493C39] font-semibold">
-                      <div className="flex items-center gap-0.5 h-4" aria-hidden="true">
-                        {[1, 2, 3, 4].map((b) => (
-                          <span
-                            key={b}
-                            className={`w-1 rounded-full bg-[#C88F98] ${
-                              playbackSnap.status === 'speaking' && !reduceMotion
-                                ? 'wave-bar'
-                                : 'h-2 opacity-60'
-                            }`}
-                          />
-                        ))}
-                      </div>
+                      {playbackSnap.status === 'loading' ? (
+                        <Loader2 className="w-3.5 h-3.5 text-[#C88F98] animate-spin shrink-0" />
+                      ) : (
+                        <div className="flex items-center gap-0.5 h-4" aria-hidden="true">
+                          {[1, 2, 3, 4].map((b) => (
+                            <span
+                              key={b}
+                              className={`w-1 rounded-full bg-[#C88F98] ${
+                                playbackSnap.status === 'speaking' && !reduceMotion
+                                  ? 'wave-bar'
+                                  : 'h-2 opacity-60'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      )}
                       <span>
-                        {playbackSnap.status === 'paused'
-                          ? 'Audio paused'
-                          : `Speaking (${getLanguageShortName(playbackSnap.activeLang || chatLanguage)})`}
+                        {playbackSnap.status === 'loading'
+                          ? `Preparing ${getAudioLanguageBadge(playbackSnap.activeLang || chatLanguage)}`
+                          : playbackSnap.status === 'paused'
+                          ? `Paused (${getAudioLanguageBadge(playbackSnap.activeLang || chatLanguage)})`
+                          : `Speaking: ${getAudioLanguageBadge(playbackSnap.activeLang || chatLanguage)}`}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          playbackSnap.status === 'paused'
-                            ? speechService.resume()
-                            : speechService.pause()
-                        }
-                        className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[#493C39] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {/* Speed Pills (0.75x / 0.9x / 1.0x) */}
+                      <div
+                        className="inline-flex items-center bg-white border border-[#BEA06D]/30 rounded-lg p-0.5"
+                        role="group"
+                        aria-label="Audio speed"
                       >
-                        {playbackSnap.status === 'paused' ? (
-                          <Play className="w-3 h-3" />
-                        ) : (
-                          <Pause className="w-3 h-3" />
-                        )}
-                        <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
-                      </button>
+                        {([0.75, 0.9, 1.0] as const).map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => handleSpeechRateChange(r)}
+                            className={`compact-chip px-1.5 py-0.5 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                              speechRate === r
+                                ? 'bg-[#BEA06D] text-white'
+                                : 'text-[#493C39]/80 hover:text-[#493C39]'
+                            }`}
+                          >
+                            {r === 1 ? '1.0x' : `${r}x`}
+                          </button>
+                        ))}
+                      </div>
+
+                      {playbackSnap.status !== 'loading' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            playbackSnap.status === 'paused'
+                              ? speechService.resume()
+                              : speechService.pause()
+                          }
+                          className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[#493C39] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          {playbackSnap.status === 'paused' ? (
+                            <Play className="w-3 h-3" />
+                          ) : (
+                            <Pause className="w-3 h-3" />
+                          )}
+                          <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => speechService.replay()}
@@ -2558,13 +2621,14 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                         <RotateCcw className="w-3 h-3" />
                         <span>Replay</span>
                       </button>
+
                       <button
                         type="button"
                         onClick={() => speechService.stop()}
                         className="compact-chip px-2.5 py-1 rounded-lg bg-[#C88F98] text-white font-semibold inline-flex items-center gap-1 cursor-pointer"
                       >
                         <VolumeX className="w-3 h-3" />
-                        <span>Stop Audio</span>
+                        <span>Stop</span>
                       </button>
                     </div>
                   </div>
@@ -2598,13 +2662,19 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   </div>
                 )}
 
-                {/* Voice Error / Unsupported Browser Notice */}
+                {/* Voice Error / Missing OS Voice Pack Notice */}
                 {voiceStatusMessage && (
-                  <div className="px-3.5 sm:px-5 py-2 bg-[#FCF9F5] border-b border-[#E6C1C4] flex items-center justify-between gap-2 text-xs text-[#493C39]">
-                    <span>{voiceStatusMessage}</span>
+                  <div className="px-3.5 sm:px-5 py-2.5 bg-[#E6C1C4]/18 border-b border-[#C88F98]/50 flex items-start justify-between gap-2.5 text-xs text-[#493C39]">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
+                      <span className="leading-relaxed">{voiceStatusMessage}</span>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setVoiceStatusMessage(null)}
+                      onClick={() => {
+                        setVoiceStatusMessage(null);
+                        speechService.clearError();
+                      }}
                       className="text-[#8A6D3F] font-semibold underline shrink-0 cursor-pointer"
                     >
                       Dismiss

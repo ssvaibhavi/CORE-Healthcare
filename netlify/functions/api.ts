@@ -1,10 +1,12 @@
 import {
   checkRateLimit,
+  getTtsCapabilities,
   mapGeminiError,
   runClarityAi,
   runCompanionAi,
   runSmartJourneyAi,
   runTranslateAi,
+  runTtsAi,
 } from '../../server/geminiService.ts';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -22,11 +24,14 @@ export default async function handler(req: Request): Promise<Response> {
     const keyConfigured =
       Boolean(process.env.GEMINI_API_KEY?.trim()) &&
       process.env.GEMINI_API_KEY?.trim() !== 'MY_GEMINI_API_KEY';
+    const ttsCaps = getTtsCapabilities();
 
     return jsonResponse({
       ok: true,
       service: 'CORE Rosewater Netlify API',
       aiConfigured: keyConfigured,
+      ttsConfigured: ttsCaps.cloudTtsConfigured,
+      ttsProviders: ttsCaps.providers,
     });
   }
 
@@ -72,6 +77,10 @@ export default async function handler(req: Request): Promise<Response> {
     }
     if (pathname === '/ai/translate') {
       const data = await runTranslateAi(body);
+      return jsonResponse({ ok: true, data });
+    }
+    if (pathname === '/ai/tts') {
+      const data = await runTtsAi(body);
       return jsonResponse({ ok: true, data });
     }
     return jsonResponse({ error: 'NOT_FOUND', message: 'Unknown AI endpoint.' }, 404);
