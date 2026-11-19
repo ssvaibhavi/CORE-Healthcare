@@ -2,10 +2,17 @@ import { ExplanationComplexity, Language, PageView } from '../types';
 
 export interface CompanionAiResponse {
   reply: string;
+  responseLanguage?: Language;
   suggestedPage?: PageView;
   suggestedActionLabel?: string;
   followUpQuestion?: string;
   safetyNotice?: string;
+}
+
+export interface TranslateAiResponse {
+  translatedText: string;
+  targetLanguage: Language;
+  verificationNote?: string;
 }
 
 export interface ClarityAiResponse {
@@ -146,6 +153,7 @@ export function askCompanionAi(params: {
   message: string;
   language: Language;
   complexity?: ExplanationComplexity;
+  actionIntent?: 'chat' | 'simplify' | 'elaborate';
   guidedMode?: boolean;
   voicePreferred?: boolean;
   currentPage: PageView;
@@ -154,6 +162,14 @@ export function askCompanionAi(params: {
   consentAccepted: boolean;
 }): Promise<CompanionAiResponse> {
   return postAiEndpoint<CompanionAiResponse>('/api/ai/companion', params);
+}
+
+export function translateAiText(params: {
+  text: string;
+  targetLanguage: Language;
+  consentAccepted: boolean;
+}): Promise<TranslateAiResponse> {
+  return postAiEndpoint<TranslateAiResponse>('/api/ai/translate', params);
 }
 
 export function simplifyWithClarityAi(params: {

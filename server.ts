@@ -10,6 +10,7 @@ import {
   runClarityAi,
   runCompanionAi,
   runSmartJourneyAi,
+  runTranslateAi,
 } from './server/geminiService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,6 +91,26 @@ async function startServer() {
 
     try {
       const result = await runSmartJourneyAi(req.body ?? {});
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const mapped = mapGeminiError(err);
+      res.status(mapped.status).json({ error: mapped.code, message: mapped.message });
+    }
+  });
+
+  app.post('/api/ai/translate', async (req, res) => {
+    const clientIp = req.ip || 'local';
+    const limit = checkRateLimit(clientIp);
+    if (!limit.allowed) {
+      res.status(429).json({
+        error: 'RATE_LIMITED',
+        message: `Too many AI requests. Please wait ${limit.retryAfterSec} seconds and try again.`,
+      });
+      return;
+    }
+
+    try {
+      const result = await runTranslateAi(req.body ?? {});
       res.json({ ok: true, data: result });
     } catch (err) {
       const mapped = mapGeminiError(err);

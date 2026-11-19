@@ -544,6 +544,9 @@ export default function App() {
             onLanguageChange={handleLanguageChange}
             onPageChange={handlePageChange}
             reduceMotion={effectiveMotionMode === 'none'}
+            complexity={comfortSettings.explanationComplexity}
+            aiConsentGranted={aiConsentGranted}
+            onAcceptAiConsent={() => setAiConsentGranted(true)}
           />
         )}
 
@@ -655,6 +658,9 @@ export default function App() {
         onOpenComfortMode={() => setComfortOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
         comfortSettings={comfortSettings}
+        onUpdateComplexity={(next) =>
+          setComfortSettings((prev) => ({ ...prev, explanationComplexity: next }))
+        }
         reduceMotion={effectiveMotionMode === 'none'}
         resetSignal={demoResetSignal}
         aiConsentGranted={aiConsentGranted}

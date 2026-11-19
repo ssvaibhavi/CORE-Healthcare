@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Appointment, Language, PageView } from '../types';
-import { CLARITY_EXAMPLES } from '../data/enhancementsData';
-import { speechService } from '../utils/speech';
+import { Appointment, ExplanationComplexity, Language, PageView } from '../types';
+import { AiConsentNotice } from '../components/AiConsentNotice';
+import { AiSkeletonLoader } from '../components/AiTrustLayer';
+import { askCompanionAi, formatAiErrorMessage } from '../utils/aiClient';
+import {
+  detectInputLanguage,
+  getLanguageShortName,
+  getScriptFontClass,
+  getSpeechRecognitionLocale,
+} from '../utils/languageIntelligence';
+import { LanguageVoiceSupport, speechService, SpeechPlaybackSnapshot } from '../utils/speech';
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,11 +17,17 @@ import {
   MicOff,
   RotateCcw,
   Volume2,
+  VolumeX,
+  Pause,
+  Play,
   Send,
   Info,
   ShieldAlert,
   Sparkles,
-  Languages
+  SquarePen,
+  Check,
+  Copy,
+  AlertCircle,
 } from 'lucide-react';
 
 interface VoiceBridgeViewProps {
@@ -22,14 +36,19 @@ interface VoiceBridgeViewProps {
   onLanguageChange: (lang: Language) => void;
   onPageChange: (page: PageView) => void;
   reduceMotion?: boolean;
+  complexity?: ExplanationComplexity;
+  aiConsentGranted?: boolean;
+  onAcceptAiConsent?: () => void;
 }
 
-interface TranscriptEntry {
+interface VoiceTurn {
   id: string;
-  speaker: 'user' | 'bridge';
+  speaker: 'user' | 'assistant' | 'error';
   text: string;
+  language: Language;
   suggestedPage?: PageView;
   suggestedLabel?: string;
+  safetyNotice?: string;
 }
 
 export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
@@ -38,364 +57,414 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
   onLanguageChange,
   onPageChange,
   reduceMotion = false,
+  complexity = 'simple',
+  aiConsentGranted = false,
+  onAcceptAiConsent,
 }) => {
-  const [isListening, setIsListening] = useState(false);
-  const [recognitionError, setRecognitionError] = useState<string | null>(null);
-  const [textInput, setTextInput] = useState('');
-  const [lastSpokenInstruction, setLastSpokenInstruction] = useState<string>('');
-  const [availableVoiceSummary, setAvailableVoiceSummary] = useState<{
-    hasSpeechRecognition: boolean;
-    hasNativeVoiceForLang: boolean;
-  }>({
-    hasSpeechRecognition: false,
-    hasNativeVoiceForLang: false,
-  });
-
-  const recognitionRef = useRef<any>(null);
-
   const getInitialGreeting = (lang: Language) => {
     if (lang === 'kn') {
-      return `ನಮಸ್ಕಾರ ${appointment.patientNameKannada} ರವರೇ. CORE VoiceBridge ಗೆ ಸ್ವಾಗತ. ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್, ಭಾಷೆ ಬದಲಾವಣೆ ಅಥವಾ ಸರಳ ವಿವರಣೆಗಾಗಿ ಕೆಳಗಿನ ಮೈಕ್ ಅಥವಾ ಬಟನ್ ಬಳಸಿ.`;
+      return `ನಮಸ್ಕಾರ ${appointment.patientNameKannada} ರವರೇ. CORE VoiceBridge ಗೆ ಸ್ವಾಗತ. ಮೈಕ್ರೊಫೋನ್ ಒತ್ತಿ ಮಾತನಾಡಿ, ಪಠ್ಯವನ್ನು ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಕೇಳಿಸಿರಿ.`;
     }
     if (lang === 'te') {
-      return `నమస్కారం ${appointment.patientNameTelugu} గారూ. CORE VoiceBridge కి స్వాగతం. మీ అపాయింట్‌మెంట్ వివరాలు, భాష మార్పు లేదా సులభ వివరణ కోసం మైక్ లేదా బటన్లను ఉపయోగించండి.`;
+      return `నమస్కారం ${appointment.patientNameTelugu} గారూ. CORE VoiceBridge కి స్వాగతం. మైక్రోఫోన్ నొక్కి మాట్లాడండి, టెక్స్ట్ సరిచూసి సమాధానం వినండి.`;
     }
-    return `Welcome to CORE VoiceBridge, ${appointment.patientName}. Use the microphone if supported, or tap a voice command below to navigate, switch languages, or hear simpler explanations.`;
+    return `Welcome to CORE VoiceBridge, ${appointment.patientName}. Tap the microphone to speak your question, review or edit the recognized text, send it to CORE AI, and listen to the response aloud.`;
   };
 
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>([
+  const [isListening, setIsListening] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [autoSpeakReplies, setAutoSpeakReplies] = useState(true);
+  const [recognitionNotice, setRecognitionNotice] = useState<string | null>(null);
+  const [editableDraft, setEditableDraft] = useState('');
+  const [lastSpokenText, setLastSpokenText] = useState<string>('');
+  const [lastSpokenLang, setLastSpokenLang] = useState<Language>(currentLanguage);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [voiceComplexity, setVoiceComplexity] = useState<ExplanationComplexity>(complexity);
+
+  const [languageSupport, setLanguageSupport] = useState<Record<Language, LanguageVoiceSupport>>(() =>
+    speechService.getAllLanguagesVoiceSupport()
+  );
+  const [playbackSnap, setPlaybackSnap] = useState<SpeechPlaybackSnapshot>(() =>
+    speechService.getPlaybackSnapshot()
+  );
+
+  const [turns, setTurns] = useState<VoiceTurn[]>([
     {
       id: 'vb-init',
-      speaker: 'bridge',
+      speaker: 'assistant',
       text: getInitialGreeting(currentLanguage),
+      language: currentLanguage,
     },
   ]);
 
-  useEffect(() => {
-    const win = window as any;
-    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
-    const checkVoices = () => {
-      const voices = speechService.getVoices();
-      const langPrefix = currentLanguage;
-      const hasNative = voices.some((v) =>
-        v.lang.toLowerCase().startsWith(langPrefix)
-      );
-      setAvailableVoiceSummary({
-        hasSpeechRecognition: Boolean(SpeechRec),
-        hasNativeVoiceForLang: hasNative,
-      });
-    };
+  const recognitionRef = useRef<any>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
-    checkVoices();
+  useEffect(() => {
+    setVoiceComplexity(complexity);
+  }, [complexity]);
+
+  // Keep greeting synced if no conversation started yet
+  useEffect(() => {
+    setTurns((prev) => {
+      if (prev.length === 1 && prev[0].id === 'vb-init') {
+        return [
+          {
+            id: 'vb-init',
+            speaker: 'assistant',
+            text: getInitialGreeting(currentLanguage),
+            language: currentLanguage,
+          },
+        ];
+      }
+      return prev;
+    });
+  }, [currentLanguage, appointment]);
+
+  useEffect(() => {
+    const refreshSupport = () => {
+      setLanguageSupport(speechService.getAllLanguagesVoiceSupport());
+    };
+    refreshSupport();
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = checkVoices;
+      window.speechSynthesis.onvoiceschanged = refreshSupport;
     }
+    const unsub = speechService.subscribe((snap) => setPlaybackSnap(snap));
 
     return () => {
+      unsub();
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
         } catch {
-          // ignore cleanup error
+          // ignore cleanup
         }
       }
       speechService.stop();
     };
-  }, [currentLanguage]);
+  }, []);
 
-  const speakAndAppend = (
-    text: string,
-    lang: Language,
-    suggestedPage?: PageView,
-    suggestedLabel?: string
-  ) => {
-    setLastSpokenInstruction(text);
-    setTranscript((prev) => [
-      ...prev,
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [turns, isThinking, reduceMotion]);
+
+  const activeSupport = languageSupport[currentLanguage];
+  const detection = detectInputLanguage(editableDraft);
+  const mismatchedLang =
+    detection.detected && detection.detected !== currentLanguage ? detection.detected : null;
+
+  const visualState: 'listening' | 'thinking' | 'speaking' | 'paused' | 'idle' = isListening
+    ? 'listening'
+    : isThinking
+    ? 'thinking'
+    : playbackSnap.status === 'speaking'
+    ? 'speaking'
+    : playbackSnap.status === 'paused'
+    ? 'paused'
+    : 'idle';
+
+  const speakResponse = (text: string, lang: Language, itemId: string) => {
+    setLastSpokenText(text);
+    setLastSpokenLang(lang);
+    speechService.speak(
+      text,
+      lang,
       {
-        id: `b-${Date.now()}`,
-        speaker: 'bridge',
-        text,
-        suggestedPage,
-        suggestedLabel,
+        onError: (reason) => {
+          setRecognitionNotice(
+            reason === 'unsupported'
+              ? 'Text-to-Speech is not supported in this browser.'
+              : `No voice playback output succeeded for ${getLanguageShortName(lang)} on this device. You can read the text above.`
+          );
+        },
       },
-    ]);
-    speechService.speak(text, lang);
+      0.95,
+      itemId
+    );
   };
 
-  const processCommand = (rawQuery: string) => {
+  const handleSendToGemini = async (rawQuery: string) => {
     const cleaned = rawQuery.trim();
-    if (!cleaned) return;
+    if (!cleaned || isThinking) return;
 
-    setTranscript((prev) => [
-      ...prev,
-      { id: `u-${Date.now()}`, speaker: 'user', text: cleaned },
-    ]);
-
-    const q = cleaned.toLowerCase();
-
-    // Language switching commands
-    if (q.includes('kannada') || q.includes('ಕನ್ನಡ') || q.includes('కన్నడ')) {
-      onLanguageChange('kn');
-      speakAndAppend(
-        'ಭಾಷೆಯನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಾಯಿಸಲಾಗಿದೆ. ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ದಿನಾಂಕ ' +
-          appointment.date +
-          ', ಸಮಯ ' +
-          appointment.time +
-          '.',
-        'kn',
-        'appointment',
-        'ನನ್ನ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ನೋಡಿ'
-      );
-      return;
-    }
-
-    if (q.includes('telugu') || q.includes('తెలుగు') || q.includes('ತೆಲುಗು')) {
-      onLanguageChange('te');
-      speakAndAppend(
-        'భాషను తెలుగులోకి మార్చడం జరిగింది. మీ అపాయింట్‌మెంట్ తేదీ ' +
-          appointment.date +
-          ', సమయం ' +
-          appointment.time +
-          '.',
-        'te',
-        'appointment',
-        'నా అపాయింట్‌మెంట్ చూడండి'
-      );
-      return;
-    }
-
-    if (q.includes('english') || q.includes('ಇಂಗ್ಲಿಷ್') || q.includes('ఇంగ్లీష్')) {
-      onLanguageChange('en');
-      speakAndAppend(
-        `Switched to English. Your sample appointment is on ${appointment.date} at ${appointment.time} in ${appointment.roomNumber}.`,
-        'en',
-        'appointment',
-        'Open My Appointment'
-      );
-      return;
-    }
-
-    // Repeat command
-    if (q.includes('repeat') || q.includes('again') || q.includes('ಮತ್ತೆ') || q.includes('మళ్ళీ')) {
-      const toRepeat = lastSpokenInstruction || getInitialGreeting(currentLanguage);
-      speakAndAppend(toRepeat, currentLanguage);
-      return;
-    }
-
-    // Simpler explanation command
-    if (q.includes('simple') || q.includes('explain') || q.includes('fast') || q.includes('ಸರಳ') || q.includes('సులభ')) {
-      const simpleNote = CLARITY_EXAMPLES[0].extraSimple[currentLanguage];
-      speakAndAppend(
-        simpleNote,
-        currentLanguage,
-        'clarity',
+    if (!aiConsentGranted) {
+      setRecognitionNotice(
         currentLanguage === 'kn'
-          ? 'ಸರಳವಾಗಿ ವಿವರಿಸಿ ತೆರೆಯಿರಿ'
+          ? 'ಮುಂದುವರೆಯಲು ದಯವಿಟ್ಟು ಕೆಳಗಿನ AI ಸಮ್ಮತಿಯನ್ನು ಒಪ್ಪಿಕೊಳ್ಳಿ.'
           : currentLanguage === 'te'
-          ? 'సులభ వివరణ తెరవండి'
-          : 'Open Explain It Simply'
+          ? 'కొనసాగించడానికి దయచేసి క్రింద AI అనుమతిని ఆమోదించండి.'
+          : 'Please accept AI guidance consent below before sending your voice/text question to Gemini.'
       );
       return;
     }
 
-    // Reschedule
-    if (q.includes('resched') || q.includes('change date') || q.includes('ದಿನಾಂಕ ಬದಲಿಸಿ') || q.includes('తేదీ మార్చ')) {
-      const msg =
-        currentLanguage === 'kn'
-          ? 'ದಿನಾಂಕ ಬದಲಾವಣೆ ಪುಟಕ್ಕೆ ಹೋಗಲು ಕೆಳಗಿನ ಬಟನ್ ಒತ್ತಿ. ಅಲ್ಲಿ ಬೆಳಗ್ಗೆ ಅಥವಾ ಮಧ್ಯಾಹ್ನದ ಸಮಯ ಆರಿಸಬಹುದು.'
-          : currentLanguage === 'te'
-          ? 'తేదీ మార్చడానికి క్రింది బటన్ నొక్కండి. ఉదయం లేదా మధ్యాహ్నం సమయం ఎంచుకోవచ్చు.'
-          : 'Use the button below to open Reschedule and select a new morning or afternoon slot.';
-      speakAndAppend(
-        msg,
-        currentLanguage,
-        'reschedule',
-        currentLanguage === 'kn' ? 'ದಿನಾಂಕ ಬದಲಿಸಿ' : currentLanguage === 'te' ? 'తేదీ మార్చండి' : 'Open Reschedule'
-      );
-      return;
-    }
+    setRecognitionNotice(null);
+    const userTurn: VoiceTurn = {
+      id: `u-${Date.now()}`,
+      speaker: 'user',
+      text: cleaned,
+      language: currentLanguage,
+    };
 
-    // Visit Passport / Documents
-    if (q.includes('passport') || q.includes('document') || q.includes('bring') || q.includes('ಪಾಸ್') || q.includes('పాస్')) {
-      const msg =
-        currentLanguage === 'kn'
-          ? 'ನಿಮ್ಮ ಗುರುತಿನ ಚೀಟಿ, ವೈದ್ಯರ ಚೀಟಿ ಮತ್ತು ಕ್ರಿಯೇಟಿನಿನ್ ವರದಿಯನ್ನು ತನ್ನಿ. ವಿಸಿಟ್ ಪಾಸ್‌ಪೋರ್ಟ್ ಪುಟದಲ್ಲಿ ಪ್ರಿಂಟ್ ಮಾಡಬಹುದು.'
-          : currentLanguage === 'te'
-          ? 'మీ గుర్తింపు కార్డు, డాక్టర్ చీటీ మరియు క్రియాటినిన్ రిపోర్ట్ తీసుకురండి. విజిట్ పాస్‌పోర్ట్ పేజీలో ప్రింట్ చేయవచ్చు.'
-          : 'Bring your ID card, doctor referral slip, and Creatinine report. Open My Visit Passport to print a summary card.';
-      speakAndAppend(
-        msg,
-        currentLanguage,
-        'passport',
-        currentLanguage === 'kn' ? 'ನನ್ನ ವಿಸಿಟ್ ಪಾಸ್‌ಪೋರ್ಟ್' : currentLanguage === 'te' ? 'నా విజిట్ పాస్‌పోర్ట్' : 'Open Visit Passport'
-      );
-      return;
-    }
+    const nextTurns = [...turns, userTurn];
+    setTurns(nextTurns);
+    setEditableDraft('');
+    setIsThinking(true);
 
-    // Appointment details / navigation
-    if (
-      q.includes('appointment') ||
-      q.includes('when') ||
-      q.includes('room') ||
-      q.includes('where') ||
-      q.includes('ಅಪಾಯಿಂಟ್') ||
-      q.includes('అపాయింట్')
-    ) {
-      const msg =
-        currentLanguage === 'kn'
-          ? `ನಿಮ್ಮ ಪರೀಕ್ಷೆ: ${appointment.testNameKannada}. ದಿನಾಂಕ: ${appointment.date}, ${appointment.time}. ಸ್ಥಳ: ${appointment.roomNumber}. ${appointment.directions.kn}`
-          : currentLanguage === 'te'
-          ? `మీ పరీక్ష: ${appointment.testNameTelugu}. తేదీ: ${appointment.date}, ${appointment.time}. గది: ${appointment.roomNumber}. ${appointment.directions.te}`
-          : `Your appointment for ${appointment.testName} is on ${appointment.date} at ${appointment.time}, in ${appointment.roomNumber}. ${appointment.directions.en}`;
-      speakAndAppend(
-        msg,
-        currentLanguage,
-        'appointment',
-        currentLanguage === 'kn' ? 'ನನ್ನ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್' : currentLanguage === 'te' ? 'నా అపాయింట్‌మెంట్' : 'Open My Appointment'
-      );
-      return;
-    }
+    try {
+      const historyForApi = nextTurns
+        .filter(
+          (t): t is VoiceTurn & { speaker: 'user' | 'assistant' } =>
+            (t.speaker === 'user' || t.speaker === 'assistant') && t.id !== 'vb-init'
+        )
+        .slice(-10)
+        .map((t) => ({
+          role: t.speaker === 'user' ? ('user' as const) : ('assistant' as const),
+          text: t.text,
+        }));
 
-    // CareFlow / help
-    if (q.includes('help') || q.includes('lost') || q.includes('careflow') || q.includes('ಸಹಾಯ') || q.includes('సహాయం')) {
-      const msg =
-        currentLanguage === 'kn'
-          ? 'ನಿರ್ಧಾರ ಮಾರ್ಗದರ್ಶಿಗಾಗಿ CareFlow ಅಥವಾ ಆಶಾ ಸಹಾಯಕ್ಕಾಗಿ "ಸಹಾಯ ಪಡೆಯಿರಿ" ಪುಟವನ್ನು ತೆರೆಯಬಹುದು.'
-          : currentLanguage === 'te'
-          ? 'సరైన దారి తెలుసుకోవడానికి CareFlow లేదా ఆశా సహాయం కోసం "సహాయం పొందండి" తెరవవచ్చు.'
-          : 'You can open CareFlow for step-by-step problem solving or Get Help for ASHA and hospital desk guidance.';
-      speakAndAppend(
-        msg,
-        currentLanguage,
-        'careflow',
-        currentLanguage === 'kn' ? 'CareFlow ತೆರೆಯಿರಿ' : currentLanguage === 'te' ? 'CareFlow తెరవండి' : 'Open CareFlow'
-      );
-      return;
-    }
+      const aiData = await askCompanionAi({
+        message: cleaned,
+        language: currentLanguage,
+        complexity: voiceComplexity,
+        voicePreferred: true,
+        currentPage: 'voicebridge',
+        pageContext: `User is inside CORE VoiceBridge speaking/typing in ${getLanguageShortName(
+          currentLanguage
+        )}. Sample patient context: ${appointment.testName} on ${appointment.date} at ${
+          appointment.time
+        } (only mention if the user asks about the sample demo card).`,
+        history: historyForApi,
+        consentAccepted: true,
+      });
 
-    // Default navigation helper
-    const fallback =
-      currentLanguage === 'kn'
-        ? 'ನಾನು ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಸಮಯ, ಸರಳ ವಿವರಣೆ, ದಿನಾಂಕ ಬದಲಾವಣೆ, ಪಾಸ್‌ಪೋರ್ಟ್ ಅಥವಾ ಭಾಷೆ ಬದಲಾವಣೆಯಲ್ಲಿ ನೆರವಾಗುತ್ತೇನೆ.'
-        : currentLanguage === 'te'
-        ? 'నేను అపాయింట్‌మెంట్ సమయం, సులభ వివరణ, తేదీ మార్పు, పాస్‌పోర్ట్ లేదా భాష మార్చడంలో సహాయం చేయగలను.'
-        : 'I can help navigate appointments, explain instructions simply, switch languages, or open your Visit Passport. Try one of the voice presets below.';
-    speakAndAppend(fallback, currentLanguage);
+      const resolvedLang = aiData.responseLanguage || currentLanguage;
+      const assistantTurnId = `a-${Date.now()}`;
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: assistantTurnId,
+          speaker: 'assistant',
+          text: aiData.reply,
+          language: resolvedLang,
+          suggestedPage: aiData.suggestedPage,
+          suggestedLabel: aiData.suggestedActionLabel,
+          safetyNotice: aiData.safetyNotice,
+        },
+      ]);
+
+      if (autoSpeakReplies) {
+        speakResponse(aiData.reply, resolvedLang, assistantTurnId);
+      } else {
+        setLastSpokenText(aiData.reply);
+        setLastSpokenLang(resolvedLang);
+      }
+    } catch (err) {
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          speaker: 'error',
+          text: formatAiErrorMessage(err, currentLanguage),
+          language: currentLanguage,
+        },
+      ]);
+    } finally {
+      setIsThinking(false);
+    }
   };
 
   const handleToggleMic = () => {
-    setRecognitionError(null);
-    const win = window as any;
-    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    setRecognitionNotice(null);
+    const SpeechRec = speechService.getSpeechRecognitionConstructor();
 
     if (!SpeechRec) {
-      setRecognitionError(
+      setRecognitionNotice(
         currentLanguage === 'kn'
-          ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ (Speech Recognition) ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಕೆಳಗಿನ ಬಟನ್ ಅಥವಾ ಟೈಪಿಂಗ್ ಬಳಸಿ.'
+          ? 'ಈ ಬ್ರೌಸರ್ ಪರಿಸರದಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ Speech Recognition ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಕೆಳಗಿನ ಬಾಕ್ಸ್‌ನಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ.'
           : currentLanguage === 'te'
-          ? 'ఈ బ్రౌజర్‌లో వాయిస్ రికగ్నిషన్ అందుబాటులో లేదు. దయచేసి క్రింది బటన్లు లేదా టెక్స్ట్ ఇన్‌పుట్ ఉపయోగించండి.'
-          : 'Browser Speech Recognition API is not supported in this browser environment. Please use the text command bar or quick chips below.'
+          ? 'ఈ బ్రౌజర్‌లో మైక్రోఫోన్ Speech Recognition అందుబాటులో లేదు. దయచేసి క్రింద టైప్ చేయండి.'
+          : 'Browser Speech Recognition is not supported in this browser. Please type your question in the editable box below.'
       );
       return;
     }
 
     if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
       setIsListening(false);
       return;
     }
 
     try {
+      // Stop playback cleanly before activating microphone
+      speechService.stop();
       const recognition = new SpeechRec();
-      recognition.lang =
-        currentLanguage === 'kn' ? 'kn-IN' : currentLanguage === 'te' ? 'te-IN' : 'en-IN';
-      recognition.interimResults = false;
+      const locale = getSpeechRecognitionLocale(currentLanguage);
+      recognition.lang = locale;
+      recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
+      const existingPrefix = editableDraft.trim();
+
       recognition.onstart = () => setIsListening(true);
+
       recognition.onresult = (event: any) => {
-        const spokenText = event.results?.[0]?.[0]?.transcript || '';
-        setIsListening(false);
-        if (spokenText) {
-          processCommand(spokenText);
+        let recognized = '';
+        for (let i = 0; i < event.results.length; i++) {
+          recognized += event.results[i][0]?.transcript || '';
         }
+        const merged = existingPrefix
+          ? `${existingPrefix} ${recognized.trim()}`
+          : recognized.trim();
+        setEditableDraft(merged);
       };
+
       recognition.onerror = (event: any) => {
         setIsListening(false);
-        setRecognitionError(
-          currentLanguage === 'kn'
-            ? `ಮೈಕ್ರೊಫೋನ್ ಪ್ರವೇಶ ಅಥವಾ ಭಾಷಾ ಬೆಂಬಲ ಲಭ್ಯವಿಲ್ಲ (${event.error}). ಪಠ್ಯ ಆಯ್ಕೆಯನ್ನು ಬಳಸಿ.`
-            : currentLanguage === 'te'
-            ? `మైక్రోఫోన్ లేదా భాషా మద్దతు అందుబాటులో లేదు (${event.error}). టెక్స్ట్ ఇన్‌పుట్ ఉపయోగించండి.`
-            : `Speech recognition could not capture audio (${event.error}). You can use text commands below anytime.`
-        );
+        const errCode = event?.error || 'unknown';
+        if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+          setRecognitionNotice(
+            currentLanguage === 'kn'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಅನುಮತಿ ನೀಡಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ.'
+              : currentLanguage === 'te'
+              ? 'మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. దయచేసి అనుమతి ఇవ్వండి లేదా టైప్ చేయండి.'
+              : 'Microphone permission was denied. Enable mic access in browser settings or continue by typing below.'
+          );
+        } else if (errCode === 'language-not-supported') {
+          setRecognitionNotice(
+            currentLanguage === 'kn'
+              ? `ಈ ಬ್ರೌಸರ್ ${locale} ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆಯನ್ನು ಬೆಂಬಲಿಸುವುದಿಲ್ಲ. ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ.`
+              : currentLanguage === 'te'
+              ? `ఈ బ్రౌజర్ ${locale} వాయిస్ ఇన్‌పుట్‌కు మద్దతు ఇవ్వదు. దయచేసి టైప్ చేయండి.`
+              : `This browser does not support ${locale} speech recognition. You can continue typing below.`
+          );
+        } else {
+          setRecognitionNotice(
+            currentLanguage === 'kn'
+              ? `ಧ್ವನಿ ಸೆರೆಹಿಡಿಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ (${errCode}). ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.`
+              : currentLanguage === 'te'
+              ? `వాయిస్ అందుకోలేకపోయాము (${errCode}). దయచేసి టైప్ చేయండి లేదా మళ్ళీ ప్రయత్నించండి.`
+              : `Speech recognition ended (${errCode}). Edit or type your question below anytime.`
+          );
+        }
       };
+
       recognition.onend = () => setIsListening(false);
 
       recognitionRef.current = recognition;
       recognition.start();
     } catch {
       setIsListening(false);
-      setRecognitionError(
-        currentLanguage === 'kn'
-          ? 'ಮೈಕ್ರೊಫೋನ್ ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಪಠ್ಯ ಬಾಕ್ಸ್ ಬಳಸಿ.'
-          : currentLanguage === 'te'
-          ? 'మైక్రోఫోన్ ప్రారంభించలేకపోయాము. దయచేసి టెక్స్ట్ బాక్స్ ఉపయోగించండి.'
-          : 'Unable to start microphone in this preview context. Please use the text alternatives below.'
+      setRecognitionNotice(
+        'Unable to activate microphone in this browser environment. Please type your question below.'
       );
     }
   };
 
-  const handleRepeatLast = () => {
-    const text = lastSpokenInstruction || getInitialGreeting(currentLanguage);
-    speechService.speak(text, currentLanguage);
+  const handleNewConversation = () => {
+    speechService.stop();
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      setIsListening(false);
+    }
+    setTurns([
+      {
+        id: 'vb-init',
+        speaker: 'assistant',
+        text: getInitialGreeting(currentLanguage),
+        language: currentLanguage,
+      },
+    ]);
+    setEditableDraft('');
+    setRecognitionNotice(null);
   };
 
-  const quickVoicePresets: Array<{ label: Record<Language, string>; command: string }> = [
+  const handleCopy = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId((curr) => (curr === id ? null : curr)), 2000);
+    } catch {
+      // ignore clipboard restriction
+    }
+  };
+
+  const quickVoicePresets: Array<{ label: Record<Language, string>; prompt: Record<Language, string> }> = [
     {
-      label: { kn: 'ನನ್ನ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಯಾವಾಗ?', te: 'నా అపాయింట్‌మెంట్ ఎప్పుడు?', en: 'When is my appointment?' },
-      command: 'When is my appointment?',
+      label: {
+        kn: 'ಆಸ್ಪತ್ರೆ ಭೇಟಿಗೆ ಏನು ತರಬೇಕು?',
+        te: 'ఆసుపత్రి సందర్శనకు ఏమి తీసుకురావాలి?',
+        en: 'What should I bring to the hospital?',
+      },
+      prompt: {
+        kn: 'ಆಸ್ಪತ್ರೆ ಭೇಟಿಗೆ ನಾನು ಯಾವ ದಾಖಲೆಗಳನ್ನು ತರಬೇಕು?',
+        te: 'ఆసుపత్రి సందర్శనకు నేను ఏ పత్రాలు తీసుకురావాలి?',
+        en: 'What documents should I bring for my hospital visit?',
+      },
     },
     {
-      label: { kn: 'ಸರಳ ವಿವರಣೆ ಕೊಡಿ', te: 'సులభంగా వివరించండి', en: 'Give me a simpler explanation' },
-      command: 'Give me a simpler explanation',
+      label: {
+        kn: 'OPD ಎಂದರೇನು? ಸರಳವಾಗಿ ಹೇಳಿ',
+        te: 'OPD అంటే ఏమిటి? సులభంగా చెప్పండి',
+        en: 'Explain OPD simply',
+      },
+      prompt: {
+        kn: 'ಆಸ್ಪತ್ರೆಯಲ್ಲಿ OPD ಎಂದರೇನು ಎಂಬುದನ್ನು ಸರಳವಾಗಿ ವಿವರಿಸಿ.',
+        te: 'ఆసుపత్రిలో OPD అంటే ఏమిటో సులభంగా వివరించండి.',
+        en: 'Explain what OPD means at a hospital in simple words.',
+      },
     },
     {
-      label: { kn: 'ಏನು ತರಬೇಕು? (Passport)', te: 'ఏమి తీసుకురావాలి? (Passport)', en: 'What should I bring?' },
-      command: 'What should I bring? passport',
-    },
-    {
-      label: { kn: 'ದಿನಾಂಕ ಬದಲಾಯಿಸಿ', te: 'తేదీ మార్చండి', en: 'I need to reschedule' },
-      command: 'reschedule',
+      label: {
+        kn: 'ಸಮಯ ಬದಲಾವಣೆ ಹೇಗೆ ಮಾಡುವುದು?',
+        te: 'సమయం ఎలా మార్చుకోవాలి?',
+        en: 'How do I reschedule my visit?',
+      },
+      prompt: {
+        kn: 'ನನ್ನ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ದಿನಾಂಕವನ್ನು ಹೇಗೆ ಬದಲಾಯಿಸಬಹುದು?',
+        te: 'నా అపాయింట్‌మెంట్ తేదీని ఎలా మార్చుకోవచ్చు?',
+        en: 'How can I change or reschedule my hospital appointment date in CORE?',
+      },
     },
   ];
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8 soft-fade-up">
-      {/* Top Bar */}
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-7 soft-fade-up">
+      {/* Top Navigation & Language Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => onPageChange('home')}
-          className="compact-chip inline-flex items-center gap-2 text-sm font-semibold text-[#8F7242] hover:text-[#3C3330] cursor-pointer"
+          className="compact-chip inline-flex items-center gap-2 text-sm font-semibold text-[#8A6D3F] hover:text-[#493C39] cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>
-            {currentLanguage === 'kn' ? 'ಮುಖಪುಟಕ್ಕೆ ಮರಳಿ' : currentLanguage === 'te' ? 'హోమ్‌కు తిరిగి వెళ్ళండి' : 'Back to Home'}
+            {currentLanguage === 'kn'
+              ? 'ಮುಖಪುಟಕ್ಕೆ ಮರಳಿ'
+              : currentLanguage === 'te'
+              ? 'హోమ్‌కు తిరిగి వెళ్ళండి'
+              : 'Back to Home'}
           </span>
         </button>
 
         <div className="flex flex-wrap items-center gap-2">
-          {(['kn', 'te', 'en'] as const).map((lang) => (
+          {(['en', 'kn', 'te'] as const).map((lang) => (
             <button
               key={lang}
               type="button"
               onClick={() => onLanguageChange(lang)}
-              className={`compact-chip px-3 py-1 rounded-full text-xs font-bold border transition-colors cursor-pointer ${
+              className={`compact-chip px-3.5 py-1.5 rounded-full text-xs font-bold border transition-colors cursor-pointer ${
                 currentLanguage === lang
                   ? 'bg-[#BEA06D] border-[#BEA06D] text-white'
-                  : 'bg-white border-[#BEA06D]/35 text-[#3C3330]'
+                  : 'bg-white border-[#BEA06D]/35 text-[#493C39] hover:border-[#C88F98]'
               }`}
             >
               {lang === 'kn' ? 'ಕನ್ನಡ' : lang === 'te' ? 'తెలుగు' : 'English'}
@@ -405,110 +474,178 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
       </div>
 
       {/* Header */}
-      <div className="text-center max-w-3xl mx-auto space-y-3">
-        <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider inline-flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-[#BEA06D]" />
-          <span>CORE VoiceBridge</span>
+      <div className="text-center max-w-3xl mx-auto space-y-2.5">
+        <span className="text-xs font-bold text-[#8A6D3F] uppercase tracking-wider inline-flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5 text-[#C88F98]" />
+          <span>CORE VoiceBridge · Gemini Multilingual Voice</span>
         </span>
-        <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#3C3330]">
+        <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#493C39]">
           {currentLanguage === 'kn'
-            ? 'ಬಹುಭಾಷಾ ಧ್ವನಿ ಮಾರ್ಗದರ್ಶಿ'
+            ? 'ಬಹುಭಾಷಾ ಧ್ವನಿ ಸಹಾಯಕ'
             : currentLanguage === 'te'
-            ? 'బహుభాషా వాయిస్ మార్గదర్శి'
-            : 'Multilingual Conversational Accessibility'}
+            ? 'బహుభాషా వాయిస్ సహాయకుడు'
+            : 'Speak, Review & Listen in Your Language'}
         </h1>
-        <p className="text-sm sm:text-base text-[#3C3330]/80">
+        <p className="text-sm sm:text-base text-[#493C39]/80">
           {currentLanguage === 'kn'
-            ? 'ಧ್ವನಿ ಆಜ್ಞೆಗಳು ಅಥವಾ ಪಠ್ಯದ ಮೂಲಕ ಭಾಷೆ ಬದಲಿಸಿ, ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಕೇಳಿ ಮತ್ತು ವಿವರಣೆ ಪುನರಾವರ್ತಿಸಿ.'
+            ? 'ಮೈಕ್ರೊಫೋನ್ ಒತ್ತಿ ನಿಮ್ಮ ಪ್ರಶ್ನೆ ಕೇಳಿ, ಪಠ್ಯವನ್ನು ಸರಿಪಡಿಸಿ ಮತ್ತು Gemini ಉತ್ತರವನ್ನು ಧ್ವನಿಯಲ್ಲಿ ಆಲಿಸಿ.'
             : currentLanguage === 'te'
-            ? 'వాయిస్ లేదా టెక్స్ట్ ద్వారా భాష మార్చండి, అపాయింట్‌మెంట్ వినండి మరియు మళ్ళీ రిపీట్ చేయండి.'
-            : 'Navigate appointments, switch languages, request simpler instructions, or repeat audio guidance using voice or accessible text controls.'}
+            ? 'మైక్రోఫోన్ నొక్కి ప్రశ్న అడగండి, టెక్స్ట్ సరిచూసుకోండి మరియు Gemini సమాధానాన్ని వాయిస్‌లో వినండి.'
+            : 'Tap the microphone to speak, edit recognized text before sending, receive Gemini answers in English, Kannada, or Telugu, and control spoken playback.'}
         </p>
       </div>
 
-      {/* Honest Browser Support Disclosure */}
-      <div className="p-4 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/45 flex items-start gap-3 text-xs sm:text-sm text-[#3C3330]">
-        <Info className="w-5 h-5 text-[#8F7242] shrink-0 mt-0.5" />
-        <div className="space-y-1">
+      {/* Honest Browser Voice Support Matrix */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/45 space-y-3">
+        <div className="flex items-start gap-2.5 text-xs sm:text-sm text-[#493C39]">
+          <Info className="w-4 h-4 text-[#8A6D3F] shrink-0 mt-0.5" />
           <p className="font-semibold">
-            {availableVoiceSummary.hasSpeechRecognition
-              ? currentLanguage === 'kn'
-                ? 'ಬ್ರೌಸರ್ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಪತ್ತೆಯಾಗಿದೆ — ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ಅಗತ್ಯವಿದೆ.'
-                : currentLanguage === 'te'
-                ? 'బ్రౌజర్ వాయిస్ రికగ్నిషన్ అందుబాటులో ఉంది — మైక్రోఫోన్ అనుమతి అవసరం.'
-                : 'Browser Speech Recognition API detected (microphone permission required).'
-              : currentLanguage === 'kn'
-              ? 'ಈ ಬ್ರೌಸರ್ ಪರಿಸರದಲ್ಲಿ Speech Recognition ಲಭ್ಯವಿಲ್ಲ — ಕೆಳಗಿನ ಪಠ್ಯ ಮತ್ತು ತ್ವರಿತ ಧ್ವನಿ ಬಟನ್‌ಗಳು ಸಂಪೂರ್ಣವಾಗಿ ಕಾರ್ಯನಿರ್ವಹಿಸುತ್ತವೆ.'
-              : currentLanguage === 'te'
-              ? 'ఈ బ్రౌజర్‌లో Speech Recognition మద్దతు లేదు — క్రింది టెక్స్ట్ మరియు త్వరిత బటన్లు పూర్తిగా పనిచేస్తాయి.'
-              : 'Speech Recognition API is unavailable in this browser environment — text commands and spoken audio presets remain fully active.'}
+            {activeSupport.sttApiAvailable
+              ? `Browser Speech Recognition is available for ${getLanguageShortName(
+                  currentLanguage
+                )} (${getSpeechRecognitionLocale(
+                  currentLanguage
+                )}) — microphone activates only when you tap Speak.`
+              : 'Browser Speech Recognition API is not available in this browser environment — you can type freely below and use audio playback if supported.'}
           </p>
-          {!availableVoiceSummary.hasNativeVoiceForLang && (
-            <p className="text-xs text-[#8F7242]">
-              {currentLanguage === 'kn'
-                ? 'ಗಮನಿಸಿ: ನಿಮ್ಮ ಸಾಧನದಲ್ಲಿ ಸ್ಥಳೀಯ ಕನ್ನಡ ಧ್ವನಿ ಪ್ಯಾಕ್ ಇಲ್ಲದಿದ್ದರೆ, CORE ಸುರಕ್ಷಿತ ಪ್ರಗತಿ ಪಠ್ಯವನ್ನು ಪ್ರದರ್ಶಿಸುತ್ತದೆ.'
-                : currentLanguage === 'te'
-                ? 'గమనిక: మీ పరికరంలో తెలుగు వాయిస్ ప్యాక్ లేకపోతే, CORE దృశ్య వాయిస్ ప్లేబ్యాక్ చూపిస్తుంది.'
-                : `OS Voice Disclosure: No native ${currentLanguage.toUpperCase()} TTS voice pack was reported by this device, so audio playback may rely on default fallback pacing.`}
-            </p>
-          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+          {(['en', 'kn', 'te'] as const).map((langCode) => {
+            const sup = languageSupport[langCode];
+            const isSelected = langCode === currentLanguage;
+            return (
+              <div
+                key={langCode}
+                className={`p-3 rounded-xl border ${
+                  isSelected
+                    ? 'bg-white border-[#C88F98] shadow-xs'
+                    : 'bg-white/70 border-[#BEA06D]/25'
+                }`}
+              >
+                <div className="font-bold text-[#493C39]">
+                  {getLanguageShortName(langCode)} ({getSpeechRecognitionLocale(langCode)})
+                </div>
+                <div className="mt-1 space-y-0.5 text-[11px] text-[#493C39]/80">
+                  <div>
+                    Mic Input:{' '}
+                    <span className="font-semibold text-[#4A6347]">
+                      {sup.sttApiAvailable ? 'Browser API Ready' : 'Unsupported in Browser'}
+                    </span>
+                  </div>
+                  <div>
+                    Spoken Voice:{' '}
+                    <span
+                      className={`font-semibold ${
+                        sup.nativeTtsVoiceAvailable ? 'text-[#4A6347]' : 'text-[#8A6D3F]'
+                      }`}
+                    >
+                      {sup.nativeTtsVoiceAvailable
+                        ? `Available (${sup.ttsVoiceName?.slice(0, 22)})`
+                        : sup.ttsApiAvailable
+                        ? 'No OS Voice Pack Detected'
+                        : 'TTS Unsupported'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Main VoiceBridge Console */}
-      <div className="bg-white border-2 border-[#BEA06D]/45 rounded-3xl p-6 sm:p-8 shadow-md space-y-6">
-        {/* Mic & Waveform Stage */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/30">
-          <div className="flex items-center gap-5">
+      {/* Main Interactive VoiceBridge Console */}
+      <div className="bg-white border border-[#BEA06D]/45 rounded-3xl p-5 sm:p-8 shadow-md space-y-6">
+        {/* Consent Gate when needed */}
+        <AiConsentNotice
+          language={currentLanguage}
+          consentGranted={aiConsentGranted}
+          onAcceptConsent={onAcceptAiConsent || (() => {})}
+          compact
+        />
+
+        {/* Animated Rosewater Voice Stage: Idle / Listening (Blush) / Thinking / Speaking */}
+        <div
+          className={`flex flex-col md:flex-row items-center justify-between gap-5 p-5 rounded-2xl border transition-colors duration-300 ${
+            visualState === 'listening'
+              ? 'bg-[#E6C1C4]/25 border-[#C88F98]'
+              : visualState === 'speaking'
+              ? 'bg-[#A2B29B]/15 border-[#4A6347]/50'
+              : 'bg-[#FCF9F5] border-[#BEA06D]/30'
+          }`}
+        >
+          <div className="flex items-center gap-4">
             <div className="relative">
-              {isListening && !reduceMotion && (
-                <span className="absolute -inset-2 rounded-full bg-[#C98897]/40 voice-ring pointer-events-none" />
+              {visualState === 'listening' && !reduceMotion && (
+                <span className="absolute -inset-2.5 rounded-full bg-[#C88F98]/40 voice-ring pointer-events-none" />
               )}
               <button
                 type="button"
                 onClick={handleToggleMic}
-                className={`relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#BEA06D]/40 ${
-                  isListening
-                    ? 'bg-[#C98897] text-white'
-                    : availableVoiceSummary.hasSpeechRecognition
-                    ? 'bg-[#BEA06D] hover:bg-[#8F7242] text-white'
-                    : 'bg-white border-2 border-[#BEA06D]/50 text-[#8F7242]'
+                disabled={isThinking}
+                className={`relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#BEA06D]/40 disabled:opacity-50 ${
+                  visualState === 'listening'
+                    ? 'bg-[#C88F98] text-white'
+                    : activeSupport.sttApiAvailable
+                    ? 'bg-[#BEA06D] hover:bg-[#8A6D3F] text-white'
+                    : 'bg-white border-2 border-[#BEA06D]/50 text-[#8A6D3F]'
                 }`}
-                aria-label={isListening ? 'Stop listening' : 'Start voice command'}
+                aria-label={isListening ? 'Stop microphone' : 'Activate microphone'}
               >
-                {isListening ? <Mic className="w-7 h-7" /> : availableVoiceSummary.hasSpeechRecognition ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
+                {isListening ? (
+                  <MicOff className="w-7 h-7" />
+                ) : activeSupport.sttApiAvailable ? (
+                  <Mic className="w-7 h-7" />
+                ) : (
+                  <MicOff className="w-7 h-7" />
+                )}
               </button>
             </div>
 
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`inline-block w-2.5 h-2.5 rounded-full ${
-                    isListening ? 'bg-red-500 animate-pulse' : 'bg-[#A2B29B]'
-                  }`}
-                />
-                <span className="text-sm font-bold text-[#3C3330]">
-                  {isListening
-                    ? currentLanguage === 'kn'
-                      ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ... ಮಾತನಾಡಿ'
-                      : currentLanguage === 'te'
-                      ? 'వింటోంది... దయచేసి మాట్లాడండి'
-                      : 'Listening... Speak clearly'
-                    : currentLanguage === 'kn'
-                    ? 'ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ'
+            <div className="space-y-1.5">
+              <div className="text-sm sm:text-base font-bold text-[#493C39]">
+                {visualState === 'listening'
+                  ? currentLanguage === 'kn'
+                    ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ... ಮಾತನಾಡಿ'
                     : currentLanguage === 'te'
-                    ? 'మాట్లాడటానికి మైక్ నొక్కండి లేదా క్రింద టైప్ చేయండి'
-                    : 'Tap mic to speak or use text commands'}
-                </span>
+                    ? 'వింటోంది... దయచేసి మాట్లాడండి'
+                    : `Listening (${getSpeechRecognitionLocale(currentLanguage)})... Speak clearly`
+                  : visualState === 'thinking'
+                  ? currentLanguage === 'kn'
+                    ? 'Gemini ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ...'
+                    : currentLanguage === 'te'
+                    ? 'Gemini సమాధానం సిద్ధం చేస్తోంది...'
+                    : 'Thinking... Composing gentle response'
+                  : visualState === 'speaking'
+                  ? currentLanguage === 'kn'
+                    ? 'ಉತ್ತರವನ್ನು ಧ್ವನಿಯಲ್ಲಿ ಓದುತ್ತಿದೆ...'
+                    : currentLanguage === 'te'
+                    ? 'సమాధానం చదువుతోంది...'
+                    : `Speaking in ${getLanguageShortName(lastSpokenLang)}...`
+                  : visualState === 'paused'
+                  ? 'Audio playback paused'
+                  : currentLanguage === 'kn'
+                  ? 'ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ'
+                  : currentLanguage === 'te'
+                  ? 'మాట్లాడటానికి మైక్ నొక్కండి లేదా క్రింద టైప్ చేయండి'
+                  : 'Tap microphone to speak, or type below'}
               </div>
 
-              {/* Subtle Waveform Bars */}
-              <div className="flex items-center gap-1 h-7" aria-hidden="true">
+              {/* Soft Waveform Animation (Active during Listening or Speaking, static when reduceMotion) */}
+              <div className="flex items-center gap-1 h-6" aria-hidden="true">
                 {[1, 2, 3, 4, 5].map((bar) => (
                   <span
                     key={bar}
-                    className={`w-1.5 rounded-full bg-[#BEA06D] transition-all ${
-                      isListening && !reduceMotion ? 'wave-bar' : 'h-2 opacity-40'
+                    className={`w-1.5 rounded-full transition-all ${
+                      visualState === 'listening'
+                        ? 'bg-[#C88F98]'
+                        : visualState === 'speaking'
+                        ? 'bg-[#4A6347]'
+                        : 'bg-[#BEA06D]'
+                    } ${
+                      (visualState === 'listening' || visualState === 'speaking') && !reduceMotion
+                        ? 'wave-bar'
+                        : 'h-2 opacity-40'
                     }`}
                   />
                 ))}
@@ -516,153 +653,342 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
+          {/* Playback Controls: Pause / Resume / Replay / Stop / New Conversation */}
+          <div className="flex flex-wrap items-center gap-2">
+            {playbackSnap.status !== 'idle' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    playbackSnap.status === 'paused'
+                      ? speechService.resume()
+                      : speechService.pause()
+                  }
+                  className="compact-chip py-2 px-3.5 rounded-full bg-white border border-[#BEA06D]/45 text-xs font-bold text-[#493C39] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {playbackSnap.status === 'paused' ? (
+                    <Play className="w-3.5 h-3.5" />
+                  ) : (
+                    <Pause className="w-3.5 h-3.5" />
+                  )}
+                  <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => speechService.stop()}
+                  className="compact-chip py-2 px-3.5 rounded-full bg-[#C88F98] hover:bg-[#b27882] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <VolumeX className="w-3.5 h-3.5" />
+                  <span>Stop Audio</span>
+                </button>
+              </>
+            )}
+
             <button
               type="button"
-              onClick={handleRepeatLast}
-              className="py-2.5 px-4 rounded-full bg-white hover:bg-[#BEA06D]/15 border border-[#BEA06D] text-xs font-bold text-[#8F7242] inline-flex items-center gap-1.5 cursor-pointer"
+              onClick={() =>
+                speakResponse(
+                  lastSpokenText || getInitialGreeting(currentLanguage),
+                  lastSpokenText ? lastSpokenLang : currentLanguage,
+                  'vb-replay'
+                )
+              }
+              className="compact-chip py-2 px-3.5 rounded-full bg-white hover:bg-[#BEA06D]/15 border border-[#BEA06D] text-xs font-bold text-[#8A6D3F] inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
               <span>
                 {currentLanguage === 'kn'
-                  ? 'ಕೊನೆಯ ಸೂಚನೆ ಮತ್ತೆ ಕೇಳಿ'
+                  ? 'ಮತ್ತೆ ಕೇಳಿ'
                   : currentLanguage === 'te'
-                  ? 'చివరి సూచన మళ్ళీ వినండి'
-                  : 'Repeat Last Instruction'}
+                  ? 'మళ్ళీ వినండి'
+                  : 'Replay'}
               </span>
             </button>
 
             <button
               type="button"
-              onClick={() => processCommand('simple')}
-              className="py-2.5 px-4 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              onClick={handleNewConversation}
+              className="compact-chip py-2 px-3.5 rounded-full bg-white hover:bg-[#E6C1C4]/20 border border-[#BEA06D]/45 text-xs font-bold text-[#493C39] inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <Languages className="w-4 h-4" />
+              <SquarePen className="w-3.5 h-3.5 text-[#C88F98]" />
               <span>
-                {currentLanguage === 'kn' ? 'ಇನ್ನಷ್ಟು ಸರಳವಾಗಿ' : currentLanguage === 'te' ? 'మరింత సులభంగా' : 'Simpler Words'}
+                {currentLanguage === 'kn'
+                  ? 'ಹೊಸ ಚಾಟ್'
+                  : currentLanguage === 'te'
+                  ? 'కొత్త చాట్'
+                  : 'New Conversation'}
               </span>
             </button>
           </div>
         </div>
 
-        {recognitionError && (
-          <div className="p-3.5 rounded-2xl bg-[#E6C1C4]/30 border border-[#C98897] text-xs text-[#3C3330] font-medium">
-            {recognitionError}
-          </div>
-        )}
-
-        {/* Accessible Transcript Panel */}
-        <div className="space-y-3">
-          <span className="text-xs font-bold text-[#8F7242] uppercase tracking-wider block">
-            {currentLanguage === 'kn'
-              ? 'ಸಂಭಾಷಣೆ ಲಿಪ್ಯಂತರ (Accessible Transcript)'
-              : currentLanguage === 'te'
-              ? 'సంభాషణ ట్రాన్స్‌క్రిప్ట్ (Transcript)'
-              : 'Accessible Voice Transcript'}
-          </span>
-
-          <div className="max-h-72 overflow-y-auto space-y-3 p-4 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/25">
-            {transcript.map((entry) => (
-              <div
-                key={entry.id}
-                className={`flex flex-col ${
-                  entry.speaker === 'user' ? 'items-end' : 'items-start'
+        {/* Settings Strip: Explanation Length + Auto-Speak */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs">
+          <div className="inline-flex items-center bg-[#FCF9F5] border border-[#BEA06D]/30 rounded-xl p-0.5">
+            {(
+              [
+                {
+                  id: 'extra_simple' as ExplanationComplexity,
+                  label: { en: 'Quick Answer', kn: 'ಚಿಕ್ಕ ಉತ್ತರ', te: 'చిన్న సమాధానం' },
+                },
+                {
+                  id: 'simple' as ExplanationComplexity,
+                  label: { en: 'Simple', kn: 'ಸರಳ', te: 'సులభం' },
+                },
+                {
+                  id: 'detailed' as ExplanationComplexity,
+                  label: { en: 'Detailed', kn: 'ವಿವರವಾದ', te: 'వివరంగా' },
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setVoiceComplexity(opt.id)}
+                className={`compact-chip px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                  voiceComplexity === opt.id
+                    ? 'bg-[#493C39] text-white'
+                    : 'text-[#493C39]/80 hover:text-[#493C39]'
                 }`}
               >
-                <div
-                  className={`max-w-[90%] rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed ${
-                    entry.speaker === 'user'
-                      ? 'bg-[#BEA06D] text-white'
-                      : 'bg-white border border-[#BEA06D]/30 text-[#3C3330]'
-                  }`}
-                >
-                  <p>{entry.text}</p>
-                  {entry.speaker === 'bridge' && (
-                    <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-[#BEA06D]/15">
-                      <button
-                        type="button"
-                        onClick={() => speechService.speak(entry.text, currentLanguage)}
-                        className="compact-chip px-2.5 py-1 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/35 text-[11px] font-semibold text-[#8F7242] inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Volume2 className="w-3 h-3" />
-                        <span>{currentLanguage === 'kn' ? 'ಕೇಳಿ' : currentLanguage === 'te' ? 'వినండి' : 'Speak Aloud'}</span>
-                      </button>
-
-                      {entry.suggestedPage && (
-                        <button
-                          type="button"
-                          onClick={() => onPageChange(entry.suggestedPage!)}
-                          className="compact-chip px-3 py-1 rounded-full bg-[#4A6347] text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>{entry.suggestedLabel}</span>
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick Voice Action Presets & Text Alternative Input */}
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {quickVoicePresets.map((preset, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => processCommand(preset.command)}
-                className="compact-chip px-3.5 py-2 rounded-full bg-[#FCF9F5] hover:bg-[#BEA06D]/15 border border-[#BEA06D]/40 text-xs font-semibold text-[#3C3330] cursor-pointer"
-              >
-                {preset.label[currentLanguage]}
+                {opt.label[currentLanguage]}
               </button>
             ))}
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              processCommand(textInput);
-              setTextInput('');
-            }}
-            className="flex gap-2"
+          <button
+            type="button"
+            onClick={() => setAutoSpeakReplies((v) => !v)}
+            className={`compact-chip px-3 py-1.5 rounded-xl border font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
+              autoSpeakReplies
+                ? 'bg-[#A2B29B]/20 border-[#4A6347]/45 text-[#4A6347]'
+                : 'bg-[#FCF9F5] border-[#BEA06D]/30 text-[#493C39]/75'
+            }`}
           >
-            <input
-              type="text"
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
+            {autoSpeakReplies ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{autoSpeakReplies ? 'Auto-Speak Replies: On' : 'Auto-Speak Replies: Off'}</span>
+          </button>
+        </div>
+
+        {recognitionNotice && (
+          <div className="p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#C88F98] text-xs sm:text-sm text-[#493C39] flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
+            <span>{recognitionNotice}</span>
+          </div>
+        )}
+
+        {/* Editable Recognized Speech & Question Box */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSendToGemini(editableDraft);
+          }}
+          className="space-y-2.5"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor="voicebridge-editable-input"
+              className="text-xs font-bold text-[#8A6D3F] uppercase tracking-wider"
+            >
+              {currentLanguage === 'kn'
+                ? 'ಗುರುತಿಸಿದ ಧ್ವನಿ / ನಿಮ್ಮ ಪ್ರಶ್ನೆ (ಕಳುಹಿಸುವ ಮೊದಲು ತಿದ್ದುಪಡಿ ಮಾಡಬಹುದು)'
+                : currentLanguage === 'te'
+                ? 'గుర్తించిన మాట / మీ ప్రశ్న (పంపే ముందు సవరించవచ్చు)'
+                : 'Recognized Speech / Your Question (Editable before sending)'}
+            </label>
+            {editableDraft && (
+              <button
+                type="button"
+                onClick={() => setEditableDraft('')}
+                className="text-xs font-semibold text-[#8A6D3F] underline cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {mismatchedLang && (
+            <div className="p-2.5 rounded-xl bg-[#E6C1C4]/20 border border-[#C88F98]/50 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span>
+                Detected <strong>{getLanguageShortName(mismatchedLang)}</strong> input. Would you
+                like to switch to {getLanguageShortName(mismatchedLang)} for the response?
+              </span>
+              <button
+                type="button"
+                onClick={() => onLanguageChange(mismatchedLang)}
+                className="compact-chip px-3 py-1 rounded-lg bg-[#C88F98] text-white font-semibold cursor-pointer"
+              >
+                Switch to {getLanguageShortName(mismatchedLang)}
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            <textarea
+              id="voicebridge-editable-input"
+              rows={2}
+              value={editableDraft}
+              onChange={(e) => setEditableDraft(e.target.value)}
               placeholder={
                 currentLanguage === 'kn'
-                  ? 'ಧ್ವನಿ ಬದಲಿಗೆ ಇಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ (ಉದಾ: ಕನ್ನಡ, Telugu, appointment, repeat)...'
+                  ? 'ಮೈಕ್ ಒತ್ತಿ ಮಾತನಾಡಿ ಅಥವಾ ಇಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ...'
                   : currentLanguage === 'te'
-                  ? 'వాయిస్ బదులుగా ఇక్కడ టైప్ చేయండి (ఉదా: తెలుగు, Kannada, appointment)...'
-                  : 'Type a navigation command (e.g., "Switch to Kannada", "appointment", "reschedule", "repeat")...'
+                  ? 'మైక్ నొక్కి మాట్లాడండి లేదా ఇక్కడ టైప్ చేయండి...'
+                  : 'Tap the microphone to dictate, or type your hospital navigation question here...'
               }
-              className="flex-1 px-4 py-3 rounded-2xl border border-[#BEA06D]/40 bg-[#FCF9F5] text-sm text-[#3C3330] focus:outline-none focus:ring-2 focus:ring-[#BEA06D]"
+              className={`flex-1 px-4 py-3 rounded-2xl border border-[#BEA06D]/45 bg-[#FCF9F5] text-base text-[#322826] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#BEA06D] ${getScriptFontClass(
+                editableDraft,
+                currentLanguage
+              )}`}
             />
             <button
               type="submit"
-              className="px-5 py-3 rounded-2xl bg-[#BEA06D] hover:bg-[#8F7242] text-white font-bold text-sm inline-flex items-center gap-1.5 cursor-pointer"
+              disabled={!editableDraft.trim() || isThinking || !aiConsentGranted}
+              className="px-6 py-3 rounded-2xl bg-[#BEA06D] hover:bg-[#8A6D3F] disabled:opacity-50 text-white font-bold text-sm inline-flex items-center justify-center gap-2 cursor-pointer shrink-0"
             >
               <Send className="w-4 h-4" />
-              <span className="hidden sm:inline">
-                {currentLanguage === 'kn' ? 'ಕಳುಹಿಸಿ' : currentLanguage === 'te' ? 'పంపండి' : 'Send'}
+              <span>
+                {currentLanguage === 'kn'
+                  ? 'ಕಳುಹಿಸಿ'
+                  : currentLanguage === 'te'
+                  ? 'పంపండి'
+                  : 'Ask CORE AI'}
               </span>
             </button>
-          </form>
+          </div>
+        </form>
+
+        {/* Quick Voice/Text Starters */}
+        <div className="flex flex-wrap gap-2">
+          {quickVoicePresets.map((preset, i) => (
+            <button
+              key={i}
+              type="button"
+              disabled={!aiConsentGranted || isThinking}
+              onClick={() => void handleSendToGemini(preset.prompt[currentLanguage])}
+              className="compact-chip px-3.5 py-2 rounded-xl bg-[#FCF9F5] hover:bg-[#E6C1C4]/20 disabled:opacity-50 border border-[#BEA06D]/35 text-xs sm:text-sm font-semibold text-[#493C39] cursor-pointer"
+            >
+              {preset.label[currentLanguage]}
+            </button>
+          ))}
+        </div>
+
+        {/* Accessible Conversation Transcript */}
+        <div className="space-y-3">
+          <span className="text-xs font-bold text-[#8A6D3F] uppercase tracking-wider block">
+            {currentLanguage === 'kn'
+              ? 'ಧ್ವನಿ ಮತ್ತು AI ಸಂಭಾಷಣೆ'
+              : currentLanguage === 'te'
+              ? 'వాయిస్ & AI సంభాషణ'
+              : 'VoiceBridge Conversation'}
+          </span>
+
+          <div className="max-h-[420px] overflow-y-auto space-y-3 p-4 sm:p-5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/25">
+            {turns.map((turn) => {
+              const isPlayingThis =
+                playbackSnap.activeId === turn.id && playbackSnap.status !== 'idle';
+              const fontCls = getScriptFontClass(turn.text, turn.language);
+              return (
+                <div
+                  key={turn.id}
+                  className={`flex flex-col ${
+                    turn.speaker === 'user' ? 'items-end' : 'items-start'
+                  }`}
+                >
+                  <div
+                    className={`max-w-[94%] rounded-2xl px-4 py-3.5 text-[15px] sm:text-base leading-[1.65] break-words ${fontCls} ${
+                      turn.speaker === 'user'
+                        ? 'bg-[#5B4944] text-white'
+                        : turn.speaker === 'error'
+                        ? 'bg-red-50 border border-red-200 text-red-950'
+                        : 'bg-white border border-[#BEA06D]/35 text-[#322826]'
+                    }`}
+                  >
+                    <p className="whitespace-pre-line">{turn.text}</p>
+                    {turn.safetyNotice && (
+                      <p className="mt-2 text-xs text-[#493C39]/75 italic border-t border-[#E6C1C4]/50 pt-1.5">
+                        {turn.safetyNotice}
+                      </p>
+                    )}
+
+                    {turn.speaker === 'assistant' && (
+                      <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-[#BEA06D]/15">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isPlayingThis
+                              ? speechService.stop()
+                              : speakResponse(turn.text, turn.language, turn.id)
+                          }
+                          className={`compact-chip px-3 py-1 rounded-lg border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                            isPlayingThis
+                              ? 'bg-[#C88F98] border-[#C88F98] text-white'
+                              : 'bg-[#FCF9F5] border-[#BEA06D]/35 text-[#8A6D3F]'
+                          }`}
+                        >
+                          {isPlayingThis ? (
+                            <VolumeX className="w-3.5 h-3.5" />
+                          ) : (
+                            <Volume2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {isPlayingThis
+                              ? 'Stop Audio'
+                              : turn.language === 'kn'
+                              ? 'ಕೇಳಿ'
+                              : turn.language === 'te'
+                              ? 'వినండి'
+                              : 'Listen'}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void handleCopy(turn.text, turn.id)}
+                          className="compact-chip px-3 py-1 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedId === turn.id ? (
+                            <Check className="w-3.5 h-3.5 text-[#4A6347]" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          <span>{copiedId === turn.id ? 'Copied' : 'Copy'}</span>
+                        </button>
+
+                        {turn.suggestedPage && (
+                          <button
+                            type="button"
+                            onClick={() => onPageChange(turn.suggestedPage!)}
+                            className="compact-chip px-3 py-1 rounded-lg bg-[#4A6347] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>{turn.suggestedLabel || 'Open Section'}</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {isThinking && (
+              <AiSkeletonLoader label="Composing calm multilingual voice response..." />
+            )}
+            <div ref={transcriptEndRef} />
+          </div>
         </div>
 
         {/* Non-Diagnostic Boundary */}
-        <div className="p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#E6C1C4] flex items-start gap-2.5 text-xs text-[#3C3330]">
-          <ShieldAlert className="w-4 h-4 text-[#C98897] shrink-0 mt-0.5" />
+        <div className="p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#E6C1C4] flex items-start gap-2.5 text-xs text-[#493C39]">
+          <ShieldAlert className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
           <span>
             {currentLanguage === 'kn'
               ? 'VoiceBridge ವೆಬ್‌ಸೈಟ್ ನ್ಯಾವಿಗೇಷನ್ ಮತ್ತು ಭಾಷಾ ಸಹಾಯಕ್ಕಾಗಿ ಮಾತ್ರ. ಇದು ರೋಗನಿರ್ಣಯ ಅಥವಾ ವೈದ್ಯಕೀಯ ಸಲಹೆಯನ್ನು ನೀಡುವುದಿಲ್ಲ.'
               : currentLanguage === 'te'
               ? 'VoiceBridge వెబ్‌సైట్ నావిగేషన్ కోసం మాత్రమే. ఇది వ్యాధి నిర్ధారణ లేదా వైద్య సలహా ఇవ్వదు.'
-              : 'CORE VoiceBridge assists exclusively with healthcare navigation and preparation clarity — never clinical diagnosis.'}
+              : 'CORE VoiceBridge assists exclusively with healthcare navigation and clarity — never clinical diagnosis. Verify medical instructions with hospital staff.'}
           </span>
         </div>
       </div>

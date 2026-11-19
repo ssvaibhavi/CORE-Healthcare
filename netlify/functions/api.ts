@@ -4,6 +4,7 @@ import {
   runClarityAi,
   runCompanionAi,
   runSmartJourneyAi,
+  runTranslateAi,
 } from '../../server/geminiService.ts';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -67,6 +68,10 @@ export default async function handler(req: Request): Promise<Response> {
     }
     if (pathname === '/ai/smart-journey') {
       const data = await runSmartJourneyAi(body);
+      return jsonResponse({ ok: true, data });
+    }
+    if (pathname === '/ai/translate') {
+      const data = await runTranslateAi(body);
       return jsonResponse({ ok: true, data });
     }
     return jsonResponse({ error: 'NOT_FOUND', message: 'Unknown AI endpoint.' }, 404);

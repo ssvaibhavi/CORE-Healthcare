@@ -72,6 +72,16 @@ function languageName(lang: AiLanguage): string {
   return 'English';
 }
 
+function languageScriptRequirement(lang: AiLanguage): string {
+  if (lang === 'kn') {
+    return 'Write naturally in Kannada Unicode script (ಕನ್ನಡ ಲಿಪಿ) with everyday patient-friendly words. You may keep standard hospital abbreviations like OPD or CT scan in parentheses after the Kannada explanation.';
+  }
+  if (lang === 'te') {
+    return 'Write naturally in Telugu Unicode script (తెలుగు లిపి) with everyday patient-friendly words. You may keep standard hospital abbreviations like OPD or CT scan in parentheses after the Telugu explanation.';
+  }
+  return 'Write in clear, warm, conversational English with accessible explanations for medical/hospital terms.';
+}
+
 function sanitizeText(raw: unknown, maxLen = MAX_INPUT_CHARS): string {
   if (typeof raw !== 'string') return '';
   return raw.replace(/\s+/g, ' ').trim().slice(0, maxLen);
@@ -453,6 +463,7 @@ export interface CompanionRequestPayload {
   message?: unknown;
   language?: unknown;
   complexity?: unknown;
+  actionIntent?: unknown;
   guidedMode?: unknown;
   voicePreferred?: unknown;
   currentPage?: unknown;
@@ -476,62 +487,95 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
 
   const language = normalizeLanguage(payload.language);
   const complexity = normalizeComplexity(payload.complexity);
+  const actionIntent =
+    payload.actionIntent === 'simplify' || payload.actionIntent === 'elaborate'
+      ? payload.actionIntent
+      : 'chat';
   const guidedMode = payload.guidedMode === true;
   const voicePreferred = payload.voicePreferred === true;
   const currentPage = typeof payload.currentPage === 'string' ? payload.currentPage : 'home';
   const pageContext = sanitizeText(payload.pageContext, 300);
 
-  const historyArr = Array.isArray(payload.history)
+  const rawHistory = Array.isArray(payload.history)
     ? payload.history
-        .slice(-8)
+        .slice(-10)
         .filter(
           (item): item is { role: 'user' | 'assistant'; text: string } =>
             typeof item === 'object' &&
             item !== null &&
             (item.role === 'user' || item.role === 'assistant') &&
-            typeof item.text === 'string'
+            typeof item.text === 'string' &&
+            item.text.trim().length > 0
         )
-        .map((item) => `${item.role === 'user' ? 'User' : 'CORE AI'}: ${sanitizeText(item.text, 400)}`)
     : [];
+
+  // Build native multi-turn Content[] history (excluding duplicate trailing turn if already matching userMessage)
+  const trimmedHistory =
+    rawHistory.length > 0 &&
+    rawHistory[rawHistory.length - 1].role === 'user' &&
+    sanitizeText(rawHistory[rawHistory.length - 1].text) === userMessage
+      ? rawHistory.slice(0, -1)
+      : rawHistory;
 
   const complexityInstruction =
     complexity === 'extra_simple'
-      ? 'Use very short, reassuring sentences suitable for low-literacy elderly patients.'
+      ? 'RESPONSE MODE — QUICK ANSWER: Respond in strictly 2 to 3 concise, reassuring plain sentences (~30–65 words total). Do not use long headings or multi-part lists. Keep the meaning effortless to read or listen to aloud.'
       : complexity === 'detailed'
-      ? 'Provide thorough, well-structured, polite guidance.'
-      : 'Use warm, plain everyday language.';
+      ? 'RESPONSE MODE — DETAILED EXPLANATION: Provide a thorough, well-organized guide using clear markdown section headings (##), numbered steps, practical preparation tips, and a brief closing note on what to verify with hospital staff.'
+      : 'RESPONSE MODE — SIMPLE EXPLANATION: Provide a warm, beginner-friendly explanation with 1 brief plain sentence followed by 3–5 clear numbered or bulleted practical steps.';
+
+  const intentDirective =
+    actionIntent === 'simplify'
+      ? 'The user clicked "Simplify" on your previous response. Rewrite that exact previous explanation much more simply without dropping safety accuracy.'
+      : actionIntent === 'elaborate'
+      ? 'The user clicked "Explain Further" on your previous response. Expand on that exact previous explanation with structured sections and helpful practical examples.'
+      : '';
 
   const systemInstruction = [
     `You are CORE AI Companion, an accessibility and healthcare-navigation assistant for CORE ("Care That Understands You").`,
-    `ALWAYS reply primarily in ${languageName(language)}.`,
+    `STRICT LANGUAGE REQUIREMENT: You MUST generate your entire response—including reply, suggestedActionLabel, followUpQuestion, and safetyNotice—directly in ${languageName(
+      language
+    )} (ISO code: ${language}).`,
+    languageScriptRequirement(language),
+    `Even if the user's message or earlier conversation turns are in a different language, ALWAYS respond in ${languageName(
+      language
+    )} unless explicitly told otherwise by this prompt.`,
     complexityInstruction,
+    intentDirective,
     guidedMode ? 'The user prefers step-by-step guided instructions.' : '',
-    voicePreferred ? 'Keep sentences natural and easy to listen to aloud via speech synthesis.' : '',
+    voicePreferred ? 'Use natural, clear phrasing suitable for text-to-speech playback.' : '',
     `CORE pages you can suggest by ID when relevant: home, appointment (Hear My Appointment), reschedule, reminders, journey (My Care Journey), clarity (Explain It Simply / CORE Clarity AI), carecircle (CareCircle / CORE Connect), passport (My Visit Passport), intelligence (CORE Intelligence), voicebridge, sense (CORE Sense), carecompass, careflow, accessibility-lab, help (Get Help).`,
-    `STRICT SAFETY RULES:`,
-    `1. Clearly remember you are an AI navigation & clarity assistant — NEVER claim to be a doctor, nurse, or clinician.`,
-    `2. NEVER diagnose conditions, prescribe or alter medication dosages, or interpret diagnostic test results as medical conclusions.`,
-    `3. If the user describes symptoms, pain, emergencies, or asks for medical/medication advice, warmly advise them to consult qualified hospital clinicians or emergency services immediately.`,
-    `4. Never invent appointment dates, times, or hospital confirmations, and never pretend you can view real hospital records or send live SMS/WhatsApp messages.`,
-    `5. If the user's request is ambiguous, ask one gentle clarifying follow-up question.`,
+    `STRICT PRIVACY & SAFETY RULES:`,
+    `1. You are an AI navigation & clarity assistant — NEVER claim to be a doctor, nurse, or clinician.`,
+    `2. NEVER diagnose medical conditions, prescribe or alter medication dosages, or interpret test results as medical conclusions.`,
+    `3. NEVER invent hospital appointments, dates, times, hospital policies, or pretend to access confidential patient records.`,
+    `4. If the user asks about symptoms, pain, emergencies, or medication/clinical decisions, warmly advise them to consult qualified hospital professionals or emergency services immediately.`,
+    `5. Maintain accurate continuity across follow-up turns (e.g., if the user refers to "the second point", look at the exact prior assistant turn in the conversation history).`,
   ]
     .filter(Boolean)
     .join('\n');
 
-  const promptBody = [
-    `Current CORE page ID: ${currentPage}`,
-    pageContext ? `Approved page context (no personal records): ${pageContext}` : '',
-    historyArr.length > 0 ? `Recent conversation context:\n${historyArr.join('\n')}` : '',
-    `Current user message: ${userMessage}`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  const multiTurnContents = trimmedHistory.map((item) => ({
+    role: item.role === 'assistant' ? ('model' as const) : ('user' as const),
+    parts: [{ text: sanitizeText(item.text, 900) }],
+  }));
+
+  const currentTurnText = [
+    `[Context: Current CORE page "${currentPage}"${pageContext ? ` — ${pageContext}` : ''}]`,
+    `[Required output language: ${languageName(language)} | Length mode: ${complexity}]`,
+    userMessage,
+  ].join('\n');
+
+  multiTurnContents.push({
+    role: 'user' as const,
+    parts: [{ text: currentTurnText }],
+  });
 
   const ai = getGeminiClient();
   const response = await callWithExponentialBackoff('companion', (abortSignal) =>
     ai.models.generateContent({
       model: MODEL_ID,
-      contents: promptBody,
+      contents: multiTurnContents,
       config: {
         abortSignal,
         systemInstruction,
@@ -542,7 +586,9 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
           properties: {
             reply: {
               type: Type.STRING,
-              description: 'Warm, helpful, plain-language response in the requested language.',
+              description: `Warm, helpful, plain-language response written strictly in ${languageName(
+                language
+              )} matching the requested length mode.`,
             },
             suggestedPage: {
               type: Type.STRING,
@@ -551,16 +597,21 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
             },
             suggestedActionLabel: {
               type: Type.STRING,
-              description: 'Short button label in the requested language for suggestedPage, or empty string.',
+              description: `Short button label strictly in ${languageName(
+                language
+              )} for suggestedPage, or empty string.`,
             },
             followUpQuestion: {
               type: Type.STRING,
-              description: 'Optional helpful clarifying follow-up question in the requested language, or empty string.',
+              description: `Optional helpful clarifying follow-up question strictly in ${languageName(
+                language
+              )}, or empty string.`,
             },
             safetyNotice: {
               type: Type.STRING,
-              description:
-                'Brief reminder in the requested language if medical/clinical verification is relevant, or empty string.',
+              description: `Brief reminder strictly in ${languageName(
+                language
+              )} if medical/clinical verification with hospital staff is relevant, or empty string.`,
             },
           },
           required: ['reply'],
@@ -577,6 +628,7 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
 
   return {
     reply: typeof parsed.reply === 'string' ? parsed.reply : '',
+    responseLanguage: language,
     suggestedPage,
     suggestedActionLabel:
       suggestedPage && typeof parsed.suggestedActionLabel === 'string'
@@ -774,5 +826,72 @@ export async function runSmartJourneyAi(payload: SmartJourneyRequestPayload) {
       helper: String(item.helper ?? ''),
       completed: false,
     })),
+  };
+}
+
+export interface TranslateRequestPayload {
+  text?: unknown;
+  targetLanguage?: unknown;
+  consentAccepted?: unknown;
+}
+
+export async function runTranslateAi(payload: TranslateRequestPayload) {
+  validateConsent(payload.consentAccepted);
+
+  const sourceText = sanitizeText(payload.text, 2400);
+  if (!sourceText || sourceText.length < 2) {
+    const err: AiServiceHttpError = {
+      status: 400,
+      code: 'EMPTY_TEXT',
+      message: 'Please provide text to translate.',
+    };
+    throw err;
+  }
+
+  const targetLanguage = normalizeLanguage(payload.targetLanguage);
+
+  const systemInstruction = [
+    `You are CORE Language Bridge, a faithful healthcare-accessibility translator.`,
+    `Translate the provided assistant guidance into natural ${languageName(targetLanguage)}.`,
+    languageScriptRequirement(targetLanguage),
+    `STRICT TRANSLATION RULES:`,
+    `1. Preserve the exact meaning, formatting (headings, bullet lists, numbered steps), and tone without adding new medical facts, inventing clinical orders, or altering numbers/dates.`,
+    `2. If a medical abbreviation appears (e.g., OPD, CT, NPO), explain or keep it accurately in parentheses so the patient understands.`,
+    `3. Return translatedText strictly in ${languageName(targetLanguage)} and a brief verificationNote reminding the user to confirm clinical instructions with hospital staff.`,
+  ].join('\n');
+
+  const ai = getGeminiClient();
+  const response = await callWithExponentialBackoff('translate', (abortSignal) =>
+    ai.models.generateContent({
+      model: MODEL_ID,
+      contents: `Translate the following text faithfully into ${languageName(targetLanguage)}:\n\n${sourceText}`,
+      config: {
+        abortSignal,
+        systemInstruction,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            translatedText: {
+              type: Type.STRING,
+              description: `Faithful translation strictly in ${languageName(targetLanguage)}.`,
+            },
+            verificationNote: {
+              type: Type.STRING,
+              description: `Short note in ${languageName(targetLanguage)} reminding the reader to confirm important clinical details with hospital staff.`,
+            },
+          },
+          required: ['translatedText'],
+        },
+      },
+    })
+  );
+
+  const parsed = safeJsonParse(response.text);
+  return {
+    translatedText: String(parsed.translatedText ?? ''),
+    targetLanguage,
+    verificationNote: parsed.verificationNote ? String(parsed.verificationNote) : undefined,
   };
 }

@@ -2,20 +2,31 @@ import React, { useState, useRef, useEffect } from 'react';
 import { CoreMonogramMark } from './BotanicalMotifs';
 import { AiConsentNotice } from './AiConsentNotice';
 import { AiTrustHeader, AiTrustFooter, AiSkeletonLoader } from './AiTrustLayer';
-import { ComfortSettings, Language, PageView } from '../types';
-import { askCompanionAi, formatAiErrorMessage } from '../utils/aiClient';
-import { speechService } from '../utils/speech';
+import { ComfortSettings, ExplanationComplexity, Language, PageView } from '../types';
+import { askCompanionAi, formatAiErrorMessage, translateAiText } from '../utils/aiClient';
+import {
+  detectInputLanguage,
+  getLanguageShortName,
+  getScriptFontClass,
+  getSpeechRecognitionLocale,
+} from '../utils/languageIntelligence';
+import { speechService, SpeechPlaybackSnapshot } from '../utils/speech';
 import {
   MessageCircleHeart,
   X,
   Send,
   Volume2,
+  VolumeX,
+  Pause,
+  Play,
+  RotateCcw,
   ArrowRight,
   ArrowDown,
   HelpCircle,
   ShieldAlert,
   Sparkles,
   Mic,
+  MicOff,
   Maximize2,
   Minimize2,
   Minus,
@@ -25,17 +36,32 @@ import {
   Check,
   Search,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Copy,
+  Languages,
+  BookOpen,
+  Zap,
+  FileText,
+  SquarePen,
 } from 'lucide-react';
+
+interface MessageTranslation {
+  language: Language;
+  text: string;
+  verificationNote?: string;
+}
 
 interface CompanionMessage {
   id: string;
   sender: 'user' | 'assistant' | 'error';
   text: string;
+  responseLanguage?: Language;
+  detectedInputLang?: Language;
   suggestedPage?: PageView;
   suggestedActionLabel?: string;
   followUpQuestion?: string;
   safetyNotice?: string;
+  translation?: MessageTranslation;
 }
 
 interface GuidedWorkflow {
@@ -476,12 +502,7 @@ const PAGE_CONTEXT_CONFIG: Record<PageView, PageContextEntry> = {
       {
         en: 'How do I save a calendar (.ics) reminder on my phone?',
         kn: 'ನನ್ನ ಫೋನ್‌ನಲ್ಲಿ ಕ್ಯಾಲೆಂಡರ್ (.ics) ಜ್ಞಾಪನೆ ಉಳಿಸುವುದು ಹೇಗೆ?',
-        te: 'నా ఫోన్‌లో క్యాలెండర్ (.ics) రిమైండర్ సేవ్ చేయడం ఎలా?',
-      },
-      {
-        en: 'How does the caregiver safety-net policy work?',
-        kn: 'ಆರೈಕೆದಾರರ ಸುರಕ್ಷತಾ ಜ್ಞಾಪನೆ ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ?',
-        te: 'సంరక్షకుడి సేఫ్టీ-నెట్ విధానం ఎలా పనిచేస్తుంది?',
+        te: 'నా ఫోన్‌లో క్యాలೆಂಡర్ (.ics) రిమైండర్ సేవ్ చేయడం ఎలా?',
       },
     ],
   },
@@ -498,11 +519,6 @@ const PAGE_CONTEXT_CONFIG: Record<PageView, PageContextEntry> = {
         en: 'How do I pick an easier morning transport slot?',
         kn: 'ಪ್ರಯಾಣಕ್ಕೆ ಸುಲಭವಾದ ಬೆಳಗಿನ ಸಮಯ ಹೇಗೆ ಆರಿಸುವುದು?',
         te: 'ప్రయాణానికి సులభమైన ఉదయం సమయాన్ని ఎలా ఎంచుకోవాలి?',
-      },
-      {
-        en: 'Does changing the date here update a live hospital server?',
-        kn: 'ಇಲ್ಲಿ ದಿನಾಂಕ ಬದಲಾಯಿಸಿದರೆ ಆಸ್ಪತ್ರೆ ಸರ್ವರ್ ನವೀಕರಣವಾಗುತ್ತದೆಯೇ?',
-        te: 'ఇక్కడ తేదీ మారిస్తే ఆసుపత్రి సర్వర్‌లో మారుతుందా?',
       },
     ],
   },
@@ -675,7 +691,10 @@ function renderInlineFormatting(text: string): React.ReactNode[] {
   });
 }
 
-const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
+const FormattedAssistantMessage: React.FC<{
+  text: string;
+  fontClass?: string;
+}> = ({ text, fontClass = 'font-body' }) => {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const blocks: React.ReactNode[] = [];
   let i = 0;
@@ -689,7 +708,6 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Markdown headings (#, ##, ###)
     const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
       blocks.push(
@@ -704,7 +722,6 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Unordered list block (- , * , • )
     if (/^[-*•]\s+/.test(trimmed)) {
       const items: string[] = [];
       while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
@@ -714,7 +731,7 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       blocks.push(
         <ul key={`ul-${i}`} className="list-disc pl-5 space-y-1.5 my-1">
           {items.map((item, idx) => (
-            <li key={idx} className="pl-0.5">
+            <li key={idx} className="pl-0.5 leading-[1.7]">
               {renderInlineFormatting(item)}
             </li>
           ))}
@@ -723,7 +740,6 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Ordered list block (1. , 2. )
     if (/^\d+[.)]\s+/.test(trimmed)) {
       const items: string[] = [];
       while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trim())) {
@@ -733,7 +749,7 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       blocks.push(
         <ol key={`ol-${i}`} className="list-decimal pl-5 space-y-1.5 my-1">
           {items.map((item, idx) => (
-            <li key={idx} className="pl-0.5">
+            <li key={idx} className="pl-0.5 leading-[1.7]">
               {renderInlineFormatting(item)}
             </li>
           ))}
@@ -742,7 +758,6 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Paragraph (collect consecutive non-empty plain lines)
     const paraLines: string[] = [];
     while (
       i < lines.length &&
@@ -755,14 +770,16 @@ const FormattedAssistantMessage: React.FC<{ text: string }> = ({ text }) => {
       i += 1;
     }
     blocks.push(
-      <p key={`p-${i}`} className="leading-[1.65]">
+      <p key={`p-${i}`} className="leading-[1.7]">
         {renderInlineFormatting(paraLines.join(' '))}
       </p>
     );
   }
 
   return (
-    <div className="space-y-3 text-[15.5px] sm:text-[16.5px] leading-[1.65] text-[#322826] break-words">
+    <div
+      className={`space-y-3 text-[15.5px] sm:text-[16.5px] leading-[1.7] text-[#322826] break-words ${fontClass}`}
+    >
       {blocks}
     </div>
   );
@@ -777,6 +794,7 @@ interface CoreCompanionProps {
   onPageChange: (page: PageView) => void;
   onOpenComfortMode: () => void;
   onOpenSearch?: () => void;
+  onUpdateComplexity?: (next: ExplanationComplexity) => void;
   aiConsentGranted: boolean;
   onAcceptAiConsent: () => void;
   reduceMotion?: boolean;
@@ -792,6 +810,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   onPageChange,
   onOpenComfortMode,
   onOpenSearch,
+  onUpdateComplexity,
   aiConsentGranted,
   onAcceptAiConsent,
   reduceMotion = false,
@@ -799,13 +818,19 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 }) => {
   const getGreeting = (lang: Language): string => {
     if (lang === 'kn') {
-      return 'ನಮಸ್ಕಾರ! ನಾನು CORE AI ಸಹಾಯಕ (Google Gemini ಆಧಾರಿತ). ವೆಬ್‌ಸೈಟ್ ನ್ಯಾವಿಗೇಷನ್, ಭೇಟಿ ಸಿದ್ಧತೆ, ಪ್ರವೇಶ್ಯತೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳು ಮತ್ತು ಆಸ್ಪತ್ರೆ ಪದಗಳ ಸರಳ ವಿವರಣೆಗೆ ನಾನು ನಿಮಗೆ ನೆರವಾಗಬಲ್ಲೆ. (ಗಮನಿಸಿ: ನಾನು ವೈದ್ಯರಲ್ಲ).';
+      return 'ನಮಸ್ಕಾರ! ನಾನು CORE AI ಸಹಾಯಕ (Google Gemini ಆಧಾರಿತ). ಆಸ್ಪತ್ರೆ ಭೇಟಿಯ ಸಿದ್ಧತೆ, ಪದಗಳ ಸರಳ ವಿವರಣೆ ಮತ್ತು ವೆಬ್‌ಸೈಟ್ ಮಾರ್ಗದರ್ಶನಕ್ಕೆ ನಾನು ನೆರವಾಗಬಲ್ಲೆ. (ಗಮನಿಸಿ: ನಾನು ವೈದ್ಯರಲ್ಲ).';
     }
     if (lang === 'te') {
-      return 'నమస్కారం! నేను CORE AI సహాయకుడిని (Google Gemini ఆధారితం). వెబ్‌సైట్ నావిగేషన్, సందర్శన తయారీ మరియు యాక్సెసిబిలిటీ సెట్టింగ్స్‌లో నేను సహాయం చేస్తాను. (గమనిక: నేను డాక్టర్‌ని కాదు).';
+      return 'నమస్కారం! నేను CORE AI సహాయకుడిని (Google Gemini ఆధారితం). ఆసుపత్రి సందర్శన తయారీ, పదాల సులభ వివరణ మరియు వెబ్‌సైట్ నావిగేషన్‌లో నేను సహాయం చేస్తాను. (గమనిక: నేను డాక్టర్‌ని కాదు).';
     }
-    return 'Hello! I am CORE AI Companion (powered by Google Gemini). Switch to "Guide Me Through It" for interactive step-by-step help, or ask any navigation & clarity question here. I am an AI guide, not a clinician.';
+    return 'Hello! I am CORE AI Companion (powered by Google Gemini). Ask any hospital navigation or preparation question, switch explanation depth above, or tap the microphone to speak. I am an AI guide, not a clinician.';
   };
+
+  // Synchronized chat response language (defaults to site language; can be overridden per-chat without changing site UI)
+  const [chatLanguage, setChatLanguage] = useState<Language>(language);
+  const [localComplexity, setLocalComplexity] = useState<ExplanationComplexity>(
+    comfortSettings.explanationComplexity || 'simple'
+  );
 
   const [mode, setMode] = useState<'guide' | 'chat'>('chat');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(GUIDED_WORKFLOWS[0].id);
@@ -815,7 +840,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   const [tipError, setTipError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<CompanionMessage[]>([
-    { id: 'welcome', sender: 'assistant', text: getGreeting(language) },
+    { id: 'welcome', sender: 'assistant', text: getGreeting(language), responseLanguage: language },
   ]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -825,6 +850,22 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+  const [dismissedMismatchForLang, setDismissedMismatchForLang] = useState<Language | null>(null);
+
+  // Message actions state
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [translateMenuOpenId, setTranslateMenuOpenId] = useState<string | null>(null);
+  const [translatingId, setTranslatingId] = useState<string | null>(null);
+  const [actionFeedbackError, setActionFeedbackError] = useState<string | null>(null);
+
+  // Voice dictation & TTS state
+  const [isListening, setIsListening] = useState(false);
+  const [voiceStatusMessage, setVoiceStatusMessage] = useState<string | null>(null);
+  const [playbackSnap, setPlaybackSnap] = useState<SpeechPlaybackSnapshot>(() =>
+    speechService.getPlaybackSnapshot()
+  );
+  const recognitionRef = useRef<any>(null);
+
   const [mobileViewport, setMobileViewport] = useState<{ height: number; offsetTop: number } | null>(
     null
   );
@@ -836,23 +877,68 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   const pendingReplyScrollRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const activeComplexity: ExplanationComplexity =
+    comfortSettings.explanationComplexity || localComplexity;
+
+  // Keep chatLanguage synchronized whenever global site language changes
   useEffect(() => {
-    setMessages([
-      {
-        id: `welcome-${language}-${resetSignal}`,
-        sender: 'assistant',
-        text: getGreeting(language),
-      },
-    ]);
-    setLastFailedPrompt(null);
+    setChatLanguage(language);
+    setDismissedMismatchForLang(null);
+    setMessages((prev) => {
+      // If user hasn't started chatting yet, refresh welcome greeting cleanly in the new language
+      if (prev.length === 1 && (prev[0].id === 'welcome' || prev[0].id.startsWith('welcome-'))) {
+        return [
+          {
+            id: `welcome-${language}-${resetSignal}`,
+            sender: 'assistant',
+            text: getGreeting(language),
+            responseLanguage: language,
+          },
+        ];
+      }
+      return prev;
+    });
+  }, [language, resetSignal]);
+
+  useEffect(() => {
     if (resetSignal > 0) {
+      speechService.stop();
+      setMessages([
+        {
+          id: `welcome-${language}-${resetSignal}`,
+          sender: 'assistant',
+          text: getGreeting(language),
+          responseLanguage: language,
+        },
+      ]);
+      setLastFailedPrompt(null);
       setCompletedStepIds({});
       setStepTip(null);
       setTipError(null);
       setSafetyInfoOpen(false);
       setSuggestionsOpen(false);
+      setDismissedMismatchForLang(null);
+      setVoiceStatusMessage(null);
+      setActionFeedbackError(null);
     }
-  }, [language, resetSignal]);
+  }, [resetSignal, language]);
+
+  // Subscribe to speech playback state
+  useEffect(() => {
+    return speechService.subscribe((snap) => setPlaybackSnap(snap));
+  }, []);
+
+  // Cleanup active mic on close/unmount
+  useEffect(() => {
+    if (!isOpen && isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore stop errors
+      }
+      setIsListening(false);
+    }
+  }, [isOpen, isListening]);
 
   // Track mobile visualViewport so virtual keyboard never obscures chat composer
   useEffect(() => {
@@ -908,7 +994,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
     if (!container) return;
 
     const currentTop = container.scrollTop;
-    // If user actively scrolled upward, cancel pending auto-scroll so we never fight their reading position
     if (currentTop < lastScrollTopRef.current - 8) {
       pendingReplyScrollRef.current = false;
     }
@@ -938,7 +1023,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       pendingReplyScrollRef.current = false;
       const startEl = latestMessageStartRef.current;
       if (startEl && lastMsg.id !== 'welcome' && !lastMsg.id.startsWith('welcome-')) {
-        // Scroll independently inside container to the start of the latest AI message so long responses start at the top
         const targetTop = Math.max(0, startEl.offsetTop - 16);
         container.scrollTo({
           top: targetTop,
@@ -957,7 +1041,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   }, [isLoading, isOpen, isMinimized, mode]);
 
   const activePageCtx = PAGE_CONTEXT_CONFIG[currentPage] || PAGE_CONTEXT_CONFIG.home;
-
   const activeWorkflow =
     GUIDED_WORKFLOWS.find((w) => w.id === selectedWorkflowId) || GUIDED_WORKFLOWS[0];
 
@@ -965,6 +1048,45 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   const wfTotal = activeWorkflow.steps.length;
   const wfPct = Math.round((wfCompletedCount / wfTotal) * 100);
   const wfAllDone = wfCompletedCount === wfTotal;
+
+  // Detect live language mismatch as user types or dictates
+  const detection = detectInputLanguage(inputText);
+  const suggestedInputLanguage: Language | null =
+    detection.detected &&
+    detection.detected !== chatLanguage &&
+    dismissedMismatchForLang !== detection.detected
+      ? detection.detected
+      : null;
+
+  const handleSelectComplexity = (next: ExplanationComplexity) => {
+    setLocalComplexity(next);
+    onUpdateComplexity?.(next);
+  };
+
+  const handleNewConversation = () => {
+    speechService.stop();
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      setIsListening(false);
+    }
+    setMessages([
+      {
+        id: `welcome-${chatLanguage}-${Date.now()}`,
+        sender: 'assistant',
+        text: getGreeting(chatLanguage),
+        responseLanguage: chatLanguage,
+      },
+    ]);
+    setLastFailedPrompt(null);
+    setDismissedMismatchForLang(null);
+    setTranslateMenuOpenId(null);
+    setActionFeedbackError(null);
+    setVoiceStatusMessage(null);
+  };
 
   const toggleGuidedStep = (stepId: string) => {
     setCompletedStepIds((prev) => ({ ...prev, [stepId]: !prev[stepId] }));
@@ -981,8 +1103,8 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
       const res = await askCompanionAi({
         message: prompt,
-        language,
-        complexity: clarifyMore ? 'extra_simple' : comfortSettings.explanationComplexity || 'simple',
+        language: chatLanguage,
+        complexity: clarifyMore ? 'extra_simple' : activeComplexity,
         guidedMode: true,
         voicePreferred: comfortSettings.readAloud,
         currentPage,
@@ -992,7 +1114,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       });
       setStepTip({ text: res.reply, safety: res.safetyNotice });
     } catch (err) {
-      setTipError(formatAiErrorMessage(err, language));
+      setTipError(formatAiErrorMessage(err, chatLanguage));
     } finally {
       setTipLoading(false);
     }
@@ -1000,7 +1122,13 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
   const sendMessageToGemini = async (
     rawText: string,
-    options: { isRetry?: boolean } = {}
+    options: {
+      isRetry?: boolean;
+      overrideLanguage?: Language;
+      overrideComplexity?: ExplanationComplexity;
+      actionIntent?: 'chat' | 'simplify' | 'elaborate';
+      suppressUserBubble?: boolean;
+    } = {}
   ) => {
     const cleaned = rawText.trim();
     if (!cleaned || isLoading) return;
@@ -1009,27 +1137,37 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       return;
     }
 
+    const targetLang = options.overrideLanguage || chatLanguage;
+    const targetComplexity = options.overrideComplexity || activeComplexity;
+    const inputDetection = detectInputLanguage(cleaned);
+
     const baseMessages = options.isRetry
       ? messages.filter((m, idx) => !(idx === messages.length - 1 && m.sender === 'error'))
       : messages;
 
-    const nextMessages: CompanionMessage[] = options.isRetry
-      ? baseMessages
-      : [
-          ...baseMessages,
-          {
-            id: `u-${Date.now()}`,
-            sender: 'user',
-            text: cleaned,
-          },
-        ];
+    const nextMessages: CompanionMessage[] =
+      options.isRetry || options.suppressUserBubble
+        ? baseMessages
+        : [
+            ...baseMessages,
+            {
+              id: `u-${Date.now()}`,
+              sender: 'user',
+              text: cleaned,
+              detectedInputLang: inputDetection.detected ?? undefined,
+            },
+          ];
 
     pendingReplyScrollRef.current = true;
     isNearBottomRef.current = true;
     setSuggestionsOpen(false);
+    setTranslateMenuOpenId(null);
+    setActionFeedbackError(null);
     setMessages(nextMessages);
-    if (!options.isRetry) {
+
+    if (!options.isRetry && !options.suppressUserBubble) {
       setInputText('');
+      setDismissedMismatchForLang(null);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -1038,17 +1176,22 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
     setIsLoading(true);
 
     try {
+      // Send clean conversation turns (excluding welcome/error bubbles) only after explicit consent
       const historyForApi = nextMessages
-        .filter((m): m is CompanionMessage & { sender: 'user' | 'assistant' } =>
-          m.sender === 'user' || m.sender === 'assistant'
+        .filter(
+          (m): m is CompanionMessage & { sender: 'user' | 'assistant' } =>
+            (m.sender === 'user' || m.sender === 'assistant') &&
+            m.id !== 'welcome' &&
+            !m.id.startsWith('welcome-')
         )
-        .slice(-8)
+        .slice(-10)
         .map((m) => ({ role: m.sender, text: m.text }));
 
       const aiData = await askCompanionAi({
         message: cleaned,
-        language,
-        complexity: comfortSettings.explanationComplexity || 'simple',
+        language: targetLang,
+        complexity: targetComplexity,
+        actionIntent: options.actionIntent || 'chat',
         guidedMode: comfortSettings.guidedMode,
         voicePreferred: comfortSettings.readAloud,
         currentPage,
@@ -1057,12 +1200,22 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
         consentAccepted: true,
       });
 
+      const resolvedLang = aiData.responseLanguage || targetLang;
+      const mismatchedSourceLang =
+        !options.suppressUserBubble &&
+        inputDetection.detected &&
+        inputDetection.detected !== resolvedLang
+          ? inputDetection.detected
+          : undefined;
+
       setMessages((prev) => [
         ...prev,
         {
           id: `a-${Date.now()}`,
           sender: 'assistant',
           text: aiData.reply,
+          responseLanguage: resolvedLang,
+          detectedInputLang: mismatchedSourceLang,
           suggestedPage: aiData.suggestedPage,
           suggestedActionLabel: aiData.suggestedActionLabel,
           followUpQuestion: aiData.followUpQuestion,
@@ -1070,7 +1223,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
         },
       ]);
     } catch (err) {
-      const msg = formatAiErrorMessage(err, language);
+      const msg = formatAiErrorMessage(err, targetLang);
       setLastFailedPrompt(cleaned);
       setMessages((prev) => [
         ...prev,
@@ -1078,11 +1231,187 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
           id: `err-${Date.now()}`,
           sender: 'error',
           text: msg,
+          responseLanguage: targetLang,
         },
       ]);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleCopyText = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      window.setTimeout(() => {
+        setCopiedId((prev) => (prev === id ? null : prev));
+      }, 2000);
+    } catch {
+      setActionFeedbackError('Clipboard access is restricted in this browser.');
+    }
+  };
+
+  const handleTranslateMessage = async (msg: CompanionMessage, targetLang: Language) => {
+    if (!aiConsentGranted) {
+      setSafetyInfoOpen(true);
+      return;
+    }
+    if (translatingId) return;
+
+    setTranslatingId(msg.id);
+    setTranslateMenuOpenId(null);
+    setActionFeedbackError(null);
+
+    try {
+      const res = await translateAiText({
+        text: msg.text,
+        targetLanguage: targetLang,
+        consentAccepted: true,
+      });
+
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.id === msg.id
+            ? {
+                ...item,
+                translation: {
+                  language: res.targetLanguage,
+                  text: res.translatedText,
+                  verificationNote: res.verificationNote,
+                },
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      setActionFeedbackError(formatAiErrorMessage(err, chatLanguage));
+    } finally {
+      setTranslatingId(null);
+    }
+  };
+
+  const handleToggleVoiceDictation = () => {
+    setVoiceStatusMessage(null);
+    const SpeechRec = speechService.getSpeechRecognitionConstructor();
+
+    if (!SpeechRec) {
+      setVoiceStatusMessage(
+        chatLanguage === 'kn'
+          ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಕೆಳಗಿನ ಬಾಕ್ಸ್‌ನಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ.'
+          : chatLanguage === 'te'
+          ? 'ఈ బ్రౌజర్‌లో మైక్రోఫోన్ వాయిస్ రికగ్నిషన్ లేదు. దయచేసి క్రింద టైప్ చేయండి.'
+          : 'Browser Speech Recognition is not supported here. Please type your question below.'
+      );
+      return;
+    }
+
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      // Stop any ongoing TTS before listening
+      speechService.stop();
+      const recognition = new SpeechRec();
+      const locale = getSpeechRecognitionLocale(chatLanguage);
+      recognition.lang = locale;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      const baseDraft = inputText.trim();
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0]?.transcript || '';
+        }
+        const combined = baseDraft ? `${baseDraft} ${transcript.trim()}` : transcript.trim();
+        setInputText(combined);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 108)}px`;
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        const errCode = event?.error || 'unknown';
+        if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+          setVoiceStatusMessage(
+            chatLanguage === 'kn'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಬ್ರೌಸರ್ ಅನುಮತಿ ನೀಡಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ.'
+              : chatLanguage === 'te'
+              ? 'మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. దయచేసి అనుమతి ఇవ్వండి లేదా టైప్ చేయండి.'
+              : 'Microphone permission was denied. Allow mic access or continue by typing below.'
+          );
+        } else if (errCode === 'language-not-supported') {
+          setVoiceStatusMessage(
+            chatLanguage === 'kn'
+              ? `ಈ ಬ್ರೌಸರ್ ${locale} ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆಯನ್ನು ಬೆಂಬಲಿಸುವುದಿಲ್ಲ. ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ.`
+              : chatLanguage === 'te'
+              ? `ఈ బ్రౌజర్ ${locale} వాయిస్ ఇన్‌పుట్‌కు మద్దతు ఇవ్వదు. దయచేసి టైప్ చేయండి.`
+              : `This browser does not support ${locale} voice dictation. Please type your question below.`
+          );
+        } else {
+          setVoiceStatusMessage(
+            chatLanguage === 'kn'
+              ? `ಧ್ವನಿ ಸೆರೆಹಿಡಿಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ (${errCode}). ದಯವಿಟ್ಟು ಮತ್ತೆ ಒತ್ತಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ.`
+              : chatLanguage === 'te'
+              ? `వాయిస్ అందుకోలేకపోయాము (${errCode}). దయచేసి మళ్ళీ ప్రయత్నించండి లేదా టైప్ చేయండి.`
+              : `Voice input stopped (${errCode}). You can edit/type your question below.`
+          );
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setVoiceStatusMessage(
+        chatLanguage === 'kn'
+          ? 'ಮೈಕ್ರೊಫೋನ್ ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ.'
+          : chatLanguage === 'te'
+          ? 'మైక్రోఫోన్ ప్రారంభించలేకపోయాము. దయచేసి టైప్ చేయండి.'
+          : 'Could not start microphone in this browser environment. Please type below.'
+      );
+    }
+  };
+
+  const handleListenToggle = (text: string, lang: Language, itemId: string) => {
+    if (playbackSnap.activeId === itemId && playbackSnap.status !== 'idle') {
+      speechService.stop();
+      return;
+    }
+    setVoiceStatusMessage(null);
+    speechService.speak(
+      text,
+      lang,
+      {
+        onError: (reason) => {
+          setVoiceStatusMessage(
+            reason === 'unsupported'
+              ? 'Text-to-Speech is not supported in this browser.'
+              : `Browser voice playback is unavailable for ${getLanguageShortName(lang)} on this device.`
+          );
+        },
+      },
+      0.95,
+      itemId
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1105,7 +1434,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
   const latestMessageIndex = messages.length - 1;
 
-  // Dynamic mobile viewport style for virtual keyboard safety
   const mobileOverlayStyle: React.CSSProperties | undefined =
     isOpen && !isMinimized && mobileViewport
       ? {
@@ -1118,18 +1446,15 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
   return (
     <>
-      {/* Open Companion Dialog (Desktop floating large drawer; Mobile nearly full-screen) */}
       {isOpen && !isMinimized && (
         <div
           style={mobileOverlayStyle}
           className={`fixed z-50 no-print flex flex-col bg-[#FCF9F5] border border-[#BEA06D]/75 rounded-3xl shadow-2xl overflow-hidden modal-soft-enter companion-drawer-transition ${
-            mobileViewport
-              ? 'w-auto'
-              : 'inset-2 sm:inset-auto sm:bottom-5 sm:right-5'
+            mobileViewport ? 'w-auto' : 'inset-2 sm:inset-auto sm:bottom-5 sm:right-5'
           } ${
             isExpanded
-              ? 'sm:w-[min(600px,calc(100vw-2.5rem))] sm:h-[min(85dvh,840px)]'
-              : 'sm:w-[min(520px,calc(100vw-2.5rem))] sm:h-[min(78dvh,700px)]'
+              ? 'sm:w-[min(600px,calc(100vw-2.5rem))] sm:h-[min(86dvh,850px)]'
+              : 'sm:w-[min(540px,calc(100vw-2.5rem))] sm:h-[min(80dvh,720px)]'
           }`}
           role="dialog"
           aria-modal="false"
@@ -1143,9 +1468,9 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 <div className="min-w-0">
                   <div className="font-display text-lg sm:text-xl font-bold text-[#493C39] leading-none flex items-center gap-1.5 truncate">
                     <span className="truncate">
-                      {language === 'kn'
+                      {chatLanguage === 'kn'
                         ? 'CORE AI ಸಹಾಯಕ'
-                        : language === 'te'
+                        : chatLanguage === 'te'
                         ? 'CORE AI సహాయకుడు'
                         : 'CORE Companion'}
                     </span>
@@ -1153,36 +1478,58 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   </div>
                   <span className="text-[11px] text-[#8A6D3F] font-medium block mt-0.5 truncate">
                     {activePageCtx.title[language]}
+                    {chatLanguage !== language && (
+                      <> · AI: {getLanguageShortName(chatLanguage)}</>
+                    )}
                   </span>
                 </div>
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
+                {mode === 'chat' && (
+                  <button
+                    type="button"
+                    onClick={handleNewConversation}
+                    className="compact-chip min-h-[36px] px-2.5 py-1 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/35 text-[#493C39] hover:border-[#C88F98] hover:text-[#8A6D3F] text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                    title={
+                      chatLanguage === 'kn'
+                        ? 'ಹೊಸ ಸಂಭಾಷಣೆ ಪ್ರಾರಂಭಿಸಿ'
+                        : chatLanguage === 'te'
+                        ? 'కొత్త సంభాషణ ప్రారంభించండి'
+                        : 'Start a New Conversation'
+                    }
+                  >
+                    <SquarePen className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
+                    <span className="hidden xs:inline">
+                      {chatLanguage === 'kn'
+                        ? 'ಹೊಸ ಚಾಟ್'
+                        : chatLanguage === 'te'
+                        ? 'కొత్త చాట్'
+                        : 'New Conversation'}
+                    </span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
                     onPageChange('voicebridge');
                     onToggleOpen(false);
                   }}
-                  className="compact-chip min-h-[36px] px-2.5 py-1 rounded-full bg-[#A2B29B]/20 text-[#4A6347] hover:bg-[#A2B29B]/35 text-[11px] font-semibold hidden sm:inline-flex items-center gap-1 cursor-pointer"
-                  title={
-                    language === 'kn'
-                      ? 'ಧ್ವನಿ ಸೇತು ತೆರೆಯಿರಿ'
-                      : language === 'te'
-                      ? 'వాయిస్ బ్రిడ్జ్ తెరవండి'
-                      : 'Open CORE VoiceBridge'
-                  }
+                  className="compact-chip min-h-[36px] px-2.5 py-1 rounded-full bg-[#A2B29B]/20 text-[#4A6347] hover:bg-[#A2B29B]/35 text-[11px] font-semibold hidden sm:inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                  title="Open full CORE VoiceBridge workspace"
                 >
                   <Mic className="w-3.5 h-3.5" />
-                  <span>{language === 'kn' ? 'ಧ್ವನಿ' : language === 'te' ? 'వాయిస్' : 'Voice'}</span>
+                  <span>
+                    {chatLanguage === 'kn' ? 'ಧ್ವನಿ' : chatLanguage === 'te' ? 'వాయిస్' : 'VoiceBridge'}
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setIsMinimized(true)}
-                  className="compact-chip min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 inline-flex items-center justify-center cursor-pointer"
+                  className="compact-chip min-w-[36px] min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 inline-flex items-center justify-center cursor-pointer"
                   aria-label="Minimize Companion"
-                  title={language === 'kn' ? 'ಕಿರಿದುಗೊಳಿಸಿ' : language === 'te' ? 'చిన్నదిగా చేయండి' : 'Minimize'}
                 >
                   <Minus className="w-4 h-4" />
                 </button>
@@ -1190,21 +1537,8 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsExpanded((e) => !e)}
-                  className="compact-chip min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 hidden sm:inline-flex items-center justify-center cursor-pointer"
+                  className="compact-chip min-w-[36px] min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 hidden sm:inline-flex items-center justify-center cursor-pointer"
                   aria-label={isExpanded ? 'Restore default chat size' : 'Expand chat window'}
-                  title={
-                    isExpanded
-                      ? language === 'kn'
-                        ? 'ಸಾಮಾನ್ಯ ಗಾತ್ರ'
-                        : language === 'te'
-                        ? 'సాధారణ పరిమాణం'
-                        : 'Compact view'
-                      : language === 'kn'
-                      ? 'ದೊಡ್ಡ ಗಾತ್ರಕ್ಕೆ ವಿಸ್ತರಿಸಿ'
-                      : language === 'te'
-                      ? 'పెద్ద విండోకు విస్తరించండి'
-                      : 'Expand view'
-                  }
                 >
                   {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                 </button>
@@ -1212,9 +1546,8 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 <button
                   type="button"
                   onClick={() => onToggleOpen(false)}
-                  className="compact-chip min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 inline-flex items-center justify-center cursor-pointer"
+                  className="compact-chip min-w-[36px] min-h-[36px] rounded-full text-[#493C39]/75 hover:text-[#493C39] hover:bg-[#E6C1C4]/25 inline-flex items-center justify-center cursor-pointer"
                   aria-label="Close Companion"
-                  title={language === 'kn' ? 'ಮುಚ್ಚಿ' : language === 'te' ? 'మూసివేయండి' : 'Close'}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1227,17 +1560,17 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 <button
                   type="button"
                   onClick={() => setMode('chat')}
-                  className={`compact-chip flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                  className={`compact-chip flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                     mode === 'chat'
                       ? 'bg-[#C88F98] text-white shadow-xs'
                       : 'text-[#493C39] hover:bg-[#E6C1C4]/20'
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="whitespace-nowrap">
-                    {language === 'kn'
+                  <span>
+                    {chatLanguage === 'kn'
                       ? 'CORE AI ಕೇಳಿ'
-                      : language === 'te'
+                      : chatLanguage === 'te'
                       ? 'CORE AI అడగండి'
                       : 'Ask CORE AI'}
                   </span>
@@ -1246,17 +1579,17 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 <button
                   type="button"
                   onClick={() => setMode('guide')}
-                  className={`compact-chip flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                  className={`compact-chip flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                     mode === 'guide'
                       ? 'bg-[#BEA06D] text-white shadow-xs'
                       : 'text-[#493C39] hover:bg-[#E6C1C4]/20'
                   }`}
                 >
                   <Compass className="w-3.5 h-3.5 shrink-0" />
-                  <span className="whitespace-nowrap">
-                    {language === 'kn'
+                  <span>
+                    {chatLanguage === 'kn'
                       ? 'ಹಂತ ಮಾರ್ಗದರ್ಶಿ'
-                      : language === 'te'
+                      : chatLanguage === 'te'
                       ? 'దశల సహాయం'
                       : 'Step Guide'}
                   </span>
@@ -1268,19 +1601,19 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   type="button"
                   onClick={() => setSafetyInfoOpen((s) => !s)}
                   aria-expanded={safetyInfoOpen}
-                  className={`compact-chip py-1.5 px-2.5 rounded-xl text-[11px] font-semibold border inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
+                  className={`compact-chip py-1.5 px-2.5 rounded-xl text-[11px] font-semibold border inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                     safetyInfoOpen
                       ? 'bg-[#E6C1C4]/30 border-[#C88F98] text-[#493C39]'
                       : 'bg-[#FCF9F5] border-[#BEA06D]/30 text-[#8A6D3F] hover:border-[#C88F98]'
                   }`}
                 >
                   <ShieldAlert className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
-                  <span className="whitespace-nowrap">
-                    {language === 'kn'
-                      ? 'ಸುರಕ್ಷತೆ & ಮಾಹಿತಿ'
-                      : language === 'te'
-                      ? 'భద్రత & వివరాలు'
-                      : 'Safety & Context'}
+                  <span>
+                    {chatLanguage === 'kn'
+                      ? 'ಸುರಕ್ಷತೆ'
+                      : chatLanguage === 'te'
+                      ? 'భద్రత'
+                      : 'Safety & Info'}
                   </span>
                   {safetyInfoOpen ? (
                     <ChevronUp className="w-3.5 h-3.5 shrink-0" />
@@ -1291,30 +1624,99 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
               )}
             </div>
 
-            {/* Collapsible Safety, Screen Context & Settings Panel */}
+            {/* Compact Chat Preferences Bar: Response Depth (Quick / Simple / Detailed) & AI Language */}
+            {mode === 'chat' && (
+              <div className="mt-2 pt-2 border-t border-[#BEA06D]/15 flex flex-wrap items-center justify-between gap-2">
+                {/* 3 Explanation Settings */}
+                <div
+                  className="inline-flex items-center bg-[#FCF9F5] border border-[#BEA06D]/25 rounded-lg p-0.5"
+                  role="group"
+                  aria-label="Explanation Depth"
+                >
+                  {(
+                    [
+                      {
+                        id: 'extra_simple' as ExplanationComplexity,
+                        icon: <Zap className="w-3 h-3 shrink-0" />,
+                        label: { en: 'Quick Answer', kn: 'ಚಿಕ್ಕ ಉತ್ತರ', te: 'చిన్న సమాధానం' },
+                      },
+                      {
+                        id: 'simple' as ExplanationComplexity,
+                        icon: <BookOpen className="w-3 h-3 shrink-0" />,
+                        label: { en: 'Simple', kn: 'ಸರಳ', te: 'సులభం' },
+                      },
+                      {
+                        id: 'detailed' as ExplanationComplexity,
+                        icon: <FileText className="w-3 h-3 shrink-0" />,
+                        label: { en: 'Detailed', kn: 'ವಿವರವಾದ', te: 'వివరంగా' },
+                      },
+                    ] as const
+                  ).map((opt) => {
+                    const active = activeComplexity === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => handleSelectComplexity(opt.id)}
+                        className={`compact-chip px-2 py-1 rounded-md text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
+                          active
+                            ? 'bg-[#493C39] text-white'
+                            : 'text-[#493C39]/80 hover:text-[#493C39] hover:bg-[#E6C1C4]/20'
+                        }`}
+                      >
+                        {opt.icon}
+                        <span>{opt.label[chatLanguage]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Explicit AI Response Language Control (chat-only; preserves global site language unless user switches site) */}
+                <div
+                  className="inline-flex items-center bg-[#FCF9F5] border border-[#BEA06D]/25 rounded-lg p-0.5"
+                  role="group"
+                  aria-label="AI Response Language"
+                >
+                  {(['en', 'kn', 'te'] as const).map((langOpt) => (
+                    <button
+                      key={langOpt}
+                      type="button"
+                      onClick={() => {
+                        setChatLanguage(langOpt);
+                        setDismissedMismatchForLang(null);
+                      }}
+                      className={`compact-chip px-2 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                        chatLanguage === langOpt
+                          ? 'bg-[#BEA06D] text-white'
+                          : 'text-[#493C39]/80 hover:text-[#493C39]'
+                      }`}
+                    >
+                      {langOpt === 'en' ? 'EN' : langOpt === 'kn' ? 'ಕನ್ನಡ' : 'తెలుగు'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Collapsible Safety, Screen Context & Consent Banner */}
             {mode === 'chat' && (
               <div className="graceful-expand" data-open={safetyInfoOpen ? 'true' : 'false'}>
                 <div>
-                  <div className="mt-2.5 pt-2.5 border-t border-[#BEA06D]/20 space-y-2.5">
-                    <div className="p-3 rounded-2xl bg-[#E6C1C4]/22 border border-[#E6C1C4]/70 flex items-start gap-2 text-xs text-[#493C39] leading-relaxed">
+                  <div className="mt-2.5 pt-2.5 border-t border-[#BEA06D]/20 space-y-2">
+                    <div className="p-2.5 rounded-xl bg-[#E6C1C4]/22 border border-[#E6C1C4]/70 flex items-start gap-2 text-xs text-[#493C39] leading-relaxed">
                       <ShieldAlert className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
                       <span>
-                        {language === 'kn'
+                        {chatLanguage === 'kn'
                           ? 'AI ಮಾರ್ಗದರ್ಶನ ಮಾತ್ರ: ರೋಗನಿರ್ಣಯ, ಔಷಧಿ ಪ್ರಮಾಣ ಅಥವಾ ತುರ್ತು ವೈದ್ಯಕೀಯ ಸಲಹೆ ನೀಡುವುದಿಲ್ಲ. ಪ್ರಮುಖ ವಿವರಗಳನ್ನು ಆಸ್ಪತ್ರೆ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಖಚಿತಪಡಿಸಿ.'
-                          : language === 'te'
+                          : chatLanguage === 'te'
                           ? 'AI మార్గదర్శనం మాత్రమే: వ్యాధి నిర్ధారణ, మందుల మోతాదు లేదా అత్యవసర సలహాలు ఇవ్వదు. ముఖ్య వివరాలను ఆసుపత్రి సిబ్బందితో ధృవీకరించండి.'
-                          : 'AI Guide Only — cannot diagnose conditions, adjust medicines, or verify hospital bookings. Confirm clinical details with hospital staff.'}
+                          : 'AI Guide Only — cannot diagnose conditions, prescribe medicines, or access confidential records. Verify medical instructions with hospital staff.'}
                       </span>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
                       <span className="text-[#8A6D3F] font-medium">
-                        {language === 'kn'
-                          ? 'ಪ್ರಸ್ತುತ ಪುಟ:'
-                          : language === 'te'
-                          ? 'ప్రస్తుత స్క్రీన్:'
-                          : 'Context:'}{' '}
-                        <strong className="text-[#493C39]">{activePageCtx.title[language]}</strong>
+                        Context: <strong className="text-[#493C39]">{activePageCtx.title[language]}</strong>
                       </span>
 
                       <div className="flex items-center gap-3">
@@ -1326,7 +1728,11 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                           }}
                           className="compact-chip text-xs font-semibold text-[#8A6D3F] underline hover:text-[#493C39] cursor-pointer"
                         >
-                          {language === 'kn' ? 'ಸೆಟ್ಟಿಂಗ್‌ಗಳು' : language === 'te' ? 'సెట్టింగ్స్' : 'Settings'}
+                          {chatLanguage === 'kn'
+                            ? 'ಸೆಟ್ಟಿಂಗ್‌ಗಳು'
+                            : chatLanguage === 'te'
+                            ? 'సెట్టింగ్స్'
+                            : 'Settings'}
                         </button>
                         <button
                           type="button"
@@ -1337,13 +1743,15 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                           className="compact-chip text-xs font-semibold text-[#C88F98] hover:text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
                         >
                           <HelpCircle className="w-3.5 h-3.5" />
-                          <span>{language === 'kn' ? 'ಸಹಾಯ' : language === 'te' ? 'సహాయం' : 'Get Help'}</span>
+                          <span>
+                            {chatLanguage === 'kn' ? 'ಸಹಾಯ' : chatLanguage === 'te' ? 'సహాయం' : 'Get Help'}
+                          </span>
                         </button>
                       </div>
                     </div>
 
                     <AiConsentNotice
-                      language={language}
+                      language={chatLanguage}
                       consentGranted={aiConsentGranted}
                       onAcceptConsent={onAcceptAiConsent}
                       compact
@@ -1355,7 +1763,7 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
           </div>
 
           {mode === 'guide' ? (
-            /* MODE 1: INTERACTIVE "GUIDE ME THROUGH IT" WORKFLOW */
+            /* MODE 1: INTERACTIVE STEP GUIDE */
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-5 space-y-4 bg-[#FCF9F5]">
               <div className="space-y-2">
                 <span className="text-xs font-bold text-[#8A6D3F] uppercase tracking-wider block">
@@ -1387,7 +1795,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 </div>
               </div>
 
-              {/* Selected Workflow Card */}
               <div className="bg-white border border-[#BEA06D]/40 rounded-2xl p-4 sm:p-5 space-y-3.5 soft-fade-up">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -1403,7 +1810,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   </span>
                 </div>
 
-                {/* Progress Bar */}
                 <div className="w-full h-2 bg-[#FCF9F5] border border-[#BEA06D]/25 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-[#4A6347] rounded-full transition-all duration-500"
@@ -1411,7 +1817,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   />
                 </div>
 
-                {/* Interactive Steps */}
                 <div className="space-y-2.5">
                   {activeWorkflow.steps.map((step, idx) => {
                     const done = !!completedStepIds[step.id];
@@ -1483,7 +1888,6 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   })}
                 </div>
 
-                {/* Accomplishment Summary */}
                 {wfAllDone && (
                   <div className="p-3.5 rounded-xl bg-[#A2B29B]/18 border border-[#4A6347]/60 space-y-2 soft-fade-up">
                     <div className="flex items-center gap-2 text-xs font-bold text-[#4A6347] check-pop">
@@ -1524,14 +1928,15 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 )}
               </div>
 
-              {/* Optional Gemini Natural-Language Guidance for Current Workflow */}
               <div className="space-y-2.5">
-                <AiConsentNotice
-                  language={language}
-                  consentGranted={aiConsentGranted}
-                  onAcceptConsent={onAcceptAiConsent}
-                  compact
-                />
+                {!aiConsentGranted && (
+                  <AiConsentNotice
+                    language={chatLanguage}
+                    consentGranted={aiConsentGranted}
+                    onAcceptConsent={onAcceptAiConsent}
+                    compact
+                  />
+                )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
@@ -1542,9 +1947,9 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>
-                      {language === 'kn'
+                      {chatLanguage === 'kn'
                         ? 'ಈ ಕೆಲಸಕ್ಕೆ ಸರಳ AI ಸಲಹೆ ಪಡೆಯಿರಿ'
-                        : language === 'te'
+                        : chatLanguage === 'te'
                         ? 'ఈ పని కోసం సులభ AI సూచన పొందండి'
                         : 'Get Gentle Gemini Tip for This Task'}
                     </span>
@@ -1569,9 +1974,9 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 {tipLoading && (
                   <AiSkeletonLoader
                     label={
-                      language === 'kn'
+                      chatLanguage === 'kn'
                         ? 'ಸರಳ ಭಾಷೆಯ ಸಲಹೆಯನ್ನು ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ...'
-                        : language === 'te'
+                        : chatLanguage === 'te'
                         ? 'సులభ భాషా సూచన సిద్ధం అవుతోంది...'
                         : 'Preparing plain-language step tip...'
                     }
@@ -1587,37 +1992,43 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 {stepTip && !tipLoading && (
                   <div className="p-4 rounded-2xl bg-white border border-[#BEA06D]/40 space-y-2.5 soft-fade-up">
                     <AiTrustHeader
-                      language={language}
+                      language={chatLanguage}
                       label={
-                        language === 'kn'
+                        chatLanguage === 'kn'
                           ? 'AI ಹಂತದ ಸಲಹೆ · Gemini'
-                          : language === 'te'
+                          : chatLanguage === 'te'
                           ? 'AI దశ సూచన · Gemini'
                           : 'AI Step Tip · Gemini'
                       }
                       onAskClarification={() => void handleGetGentleWorkflowTip(true)}
-                      onListen={() => speechService.speak(stepTip.text, language)}
+                      onListen={() =>
+                        handleListenToggle(stepTip.text, chatLanguage, 'workflow-tip')
+                      }
+                      isSpeaking={
+                        playbackSnap.activeId === 'workflow-tip' && playbackSnap.status !== 'idle'
+                      }
                       clarifyDisabled={tipLoading}
                     />
-                    <FormattedAssistantMessage text={stepTip.text} />
-                    <AiTrustFooter language={language} uncertaintyNote={stepTip.safety} />
+                    <FormattedAssistantMessage
+                      text={stepTip.text}
+                      fontClass={getScriptFontClass(stepTip.text, chatLanguage)}
+                    />
+                    <AiTrustFooter language={chatLanguage} uncertaintyNote={stepTip.safety} />
                   </div>
                 )}
               </div>
             </div>
           ) : (
-            /* MODE 2: SPACIOUS CONVERSATIONAL GEMINI AI COMPANION */
+            /* MODE 2: SPACIOUS CONVERSATIONAL MULTILINGUAL GEMINI COMPANION */
             <>
-              {/* Independently Scrollable Conversation Area */}
               <div
                 ref={scrollContainerRef}
                 onScroll={handleMessagesScroll}
                 className="relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 sm:px-6 sm:py-5 space-y-4 bg-[#FCF9F5]"
               >
-                {/* Show consent prompt clearly inside flow only until accepted */}
                 {!aiConsentGranted && (
                   <AiConsentNotice
-                    language={language}
+                    language={chatLanguage}
                     consentGranted={aiConsentGranted}
                     onAcceptConsent={onAcceptAiConsent}
                     compact
@@ -1626,6 +2037,17 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
                 {messages.map((msg, index) => {
                   const isLatest = index === latestMessageIndex;
+                  const isGeneratedAssistant =
+                    msg.sender === 'assistant' &&
+                    msg.id !== 'welcome' &&
+                    !msg.id.startsWith('welcome-');
+                  const msgLang = msg.responseLanguage || chatLanguage;
+                  const msgFontClass = getScriptFontClass(msg.text, msgLang);
+                  const isPlayingOriginal =
+                    playbackSnap.activeId === msg.id && playbackSnap.status !== 'idle';
+                  const isPlayingTranslation =
+                    playbackSnap.activeId === `${msg.id}-tr` && playbackSnap.status !== 'idle';
+
                   return (
                     <div
                       key={msg.id}
@@ -1640,42 +2062,38 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                             ? 'max-w-[88%] sm:max-w-[82%] px-4 py-3 sm:px-5 sm:py-3.5 bg-[#5B4944] text-white rounded-br-md'
                             : msg.sender === 'error'
                             ? 'w-full max-w-[96%] px-4 py-3.5 sm:px-5 sm:py-4 bg-red-50 border border-red-200 text-red-950 rounded-bl-md'
-                            : 'w-full max-w-[98%] sm:max-w-[94%] px-4 py-4 sm:px-6 sm:py-5 bg-white border border-[#BEA06D]/35 text-[#322826] rounded-bl-md'
+                            : 'w-full max-w-[98%] sm:max-w-[95%] px-4 py-4 sm:px-5 sm:py-4.5 bg-white border border-[#BEA06D]/35 text-[#322826] rounded-bl-md'
                         }`}
                       >
-                        {msg.sender === 'assistant' &&
-                          msg.id !== `welcome-${language}-${resetSignal}` &&
-                          msg.id !== 'welcome' && (
-                            <div className="mb-3">
-                              <AiTrustHeader
-                                language={language}
-                                label={
-                                  language === 'kn'
-                                    ? 'AI ಉತ್ತರ · Gemini'
-                                    : language === 'te'
-                                    ? 'AI సమాధానం · Gemini'
-                                    : 'AI-Generated · Gemini'
-                                }
-                                onAskClarification={
-                                  aiConsentGranted && !isLoading
-                                    ? () =>
-                                        void sendMessageToGemini(
-                                          `Please explain your previous guidance more simply and note anything I should double-check with hospital staff.`
-                                        )
-                                    : undefined
-                                }
-                                onListen={() => speechService.speak(msg.text, language)}
-                              />
-                            </div>
-                          )}
+                        {isGeneratedAssistant && (
+                          <div className="flex items-center justify-between gap-2 pb-2 mb-3 border-b border-[#BEA06D]/20 text-[11px] font-semibold text-[#4A6347]">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
+                              <span>
+                                {msgLang === 'kn'
+                                  ? 'AI ಉತ್ತರ · Gemini · ಕನ್ನಡ'
+                                  : msgLang === 'te'
+                                  ? 'AI సమాధానం · Gemini · తెలుగు'
+                                  : 'AI Response · Gemini · English'}
+                              </span>
+                            </span>
+                            <span className="text-[#8A6D3F] font-medium">
+                              {msgLang === 'kn'
+                                ? 'ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಖಚಿತಪಡಿಸಿ'
+                                : msgLang === 'te'
+                                ? 'సిబ్బందితో నిర్ధారించండి'
+                                : 'Verify With Staff'}
+                            </span>
+                          </div>
+                        )}
 
                         {msg.sender === 'error' && (
                           <div className="flex items-center gap-1.5 font-bold text-xs mb-1.5 text-red-700">
                             <AlertCircle className="w-4 h-4 shrink-0" />
                             <span>
-                              {language === 'kn'
+                              {msgLang === 'kn'
                                 ? 'AI ಸೇವಾ ಸೂಚನೆ'
-                                : language === 'te'
+                                : msgLang === 'te'
                                 ? 'AI సేవా గమనిక'
                                 : 'AI Service Notice'}
                             </span>
@@ -1683,15 +2101,106 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                         )}
 
                         {msg.sender === 'assistant' ? (
-                          <FormattedAssistantMessage text={msg.text} />
+                          <div className="space-y-3">
+                            {msg.translation && (
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-[#8A6D3F] block">
+                                Original Answer ({getLanguageShortName(msgLang)})
+                              </span>
+                            )}
+                            <FormattedAssistantMessage text={msg.text} fontClass={msgFontClass} />
+                          </div>
                         ) : (
                           <p
-                            className={`whitespace-pre-line text-[15.5px] sm:text-[16.5px] leading-[1.6] ${
-                              msg.sender === 'user' ? 'text-white' : 'text-red-950'
-                            }`}
+                            className={`whitespace-pre-line text-[15.5px] sm:text-[16.5px] leading-[1.65] ${getScriptFontClass(
+                              msg.text,
+                              msgLang
+                            )} ${msg.sender === 'user' ? 'text-white' : 'text-red-950'}`}
                           >
                             {msg.text}
                           </p>
+                        )}
+
+                        {/* Optional Mismatch Re-Answer Hint if user submitted another script without switching chat language */}
+                        {isGeneratedAssistant && msg.detectedInputLang && (
+                          <div className="mt-3 p-2.5 rounded-xl bg-[#FCF9F5] border border-[#BEA06D]/35 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <span className="text-[#493C39]">
+                              Your question appeared to be in{' '}
+                              <strong>{getLanguageShortName(msg.detectedInputLang)}</strong>.
+                            </span>
+                            <button
+                              type="button"
+                              disabled={translatingId === msg.id}
+                              onClick={() => {
+                                setChatLanguage(msg.detectedInputLang!);
+                                void handleTranslateMessage(msg, msg.detectedInputLang!);
+                              }}
+                              className="compact-chip px-2.5 py-1 rounded-lg bg-[#C88F98] hover:bg-[#b27882] text-white font-semibold cursor-pointer whitespace-nowrap"
+                            >
+                              Translate to {getLanguageShortName(msg.detectedInputLang)}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Clearly Separated Translated Version Block */}
+                        {msg.translation && (
+                          <div className="mt-4 pt-3.5 border-t-2 border-dashed border-[#BEA06D]/35 bg-[#FCF9F5]/80 rounded-xl p-3.5 space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-[#4A6347] inline-flex items-center gap-1.5">
+                                <Languages className="w-3.5 h-3.5 text-[#BEA06D]" />
+                                <span>
+                                  Translated Version ·{' '}
+                                  {getLanguageShortName(msg.translation.language)}
+                                </span>
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleListenToggle(
+                                      msg.translation!.text,
+                                      msg.translation!.language,
+                                      `${msg.id}-tr`
+                                    )
+                                  }
+                                  className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[11px] font-semibold text-[#8A6D3F] hover:border-[#C88F98] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  {isPlayingTranslation ? (
+                                    <VolumeX className="w-3 h-3 text-[#C88F98]" />
+                                  ) : (
+                                    <Volume2 className="w-3 h-3" />
+                                  )}
+                                  <span>{isPlayingTranslation ? 'Stop Audio' : 'Listen'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleCopyText(msg.translation!.text, `${msg.id}-tr`)
+                                  }
+                                  className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[11px] font-semibold text-[#493C39] hover:border-[#C88F98] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  {copiedId === `${msg.id}-tr` ? (
+                                    <Check className="w-3 h-3 text-[#4A6347]" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                  <span>{copiedId === `${msg.id}-tr` ? 'Copied' : 'Copy'}</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            <FormattedAssistantMessage
+                              text={msg.translation.text}
+                              fontClass={getScriptFontClass(
+                                msg.translation.text,
+                                msg.translation.language
+                              )}
+                            />
+                            {msg.translation.verificationNote && (
+                              <p className="text-[11px] text-[#493C39]/75 italic">
+                                {msg.translation.verificationNote}
+                              </p>
+                            )}
+                          </div>
                         )}
 
                         {msg.followUpQuestion && (
@@ -1699,42 +2208,244 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                             type="button"
                             disabled={!aiConsentGranted || isLoading}
                             onClick={() => void sendMessageToGemini(msg.followUpQuestion!)}
-                            className="mt-3.5 text-left text-sm text-[#6E542D] bg-[#FCF9F5] border border-[#BEA06D]/45 hover:border-[#C88F98] px-3.5 py-2.5 rounded-xl block w-full cursor-pointer transition-colors leading-snug"
+                            className={`mt-3.5 text-left text-sm text-[#6E542D] bg-[#FCF9F5] border border-[#BEA06D]/45 hover:border-[#C88F98] px-3.5 py-2.5 rounded-xl block w-full cursor-pointer transition-colors leading-snug ${getScriptFontClass(
+                              msg.followUpQuestion,
+                              msgLang
+                            )}`}
                           >
                             {msg.followUpQuestion}
                           </button>
                         )}
 
                         {msg.safetyNotice && (
-                          <p className="mt-3 text-xs text-[#493C39]/80 italic border-t border-[#E6C1C4]/50 pt-2 leading-relaxed">
+                          <p
+                            className={`mt-3 text-xs text-[#493C39]/80 italic border-t border-[#E6C1C4]/50 pt-2 leading-relaxed ${getScriptFontClass(
+                              msg.safetyNotice,
+                              msgLang
+                            )}`}
+                          >
                             {msg.safetyNotice}
                           </p>
                         )}
 
-                        {msg.sender === 'assistant' && (
-                          <div className="flex flex-wrap items-center gap-2 mt-3.5 pt-2.5 border-t border-[#BEA06D]/15">
-                            <button
-                              type="button"
-                              onClick={() => speechService.speak(msg.text, language)}
-                              className="compact-chip px-3 py-1.5 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#8A6D3F] hover:bg-[#E6C1C4]/20 inline-flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <Volume2 className="w-3.5 h-3.5" />
-                              <span>{language === 'kn' ? 'ಕೇಳಿ' : language === 'te' ? 'వినండి' : 'Listen'}</span>
-                            </button>
-
-                            {msg.suggestedPage && (
+                        {/* Full AI Response Actions Toolbar */}
+                        {isGeneratedAssistant && (
+                          <div className="mt-3.5 pt-2.5 border-t border-[#BEA06D]/15 space-y-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {/* Listen / Stop Audio */}
                               <button
                                 type="button"
-                                onClick={() => {
-                                  onPageChange(msg.suggestedPage!);
-                                  onToggleOpen(false);
-                                }}
-                                className="compact-chip px-3.5 py-1.5 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                                onClick={() => handleListenToggle(msg.text, msgLang, msg.id)}
+                                className={`compact-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold border inline-flex items-center gap-1 cursor-pointer whitespace-nowrap transition-colors ${
+                                  isPlayingOriginal
+                                    ? 'bg-[#C88F98] border-[#C88F98] text-white'
+                                    : 'bg-[#FCF9F5] border-[#BEA06D]/35 text-[#8A6D3F] hover:bg-[#E6C1C4]/20'
+                                }`}
                               >
-                                <span>{msg.suggestedActionLabel || activePageCtx.title[language]}</span>
-                                <ArrowRight className="w-3.5 h-3.5" />
+                                {isPlayingOriginal ? (
+                                  <VolumeX className="w-3.5 h-3.5 shrink-0" />
+                                ) : (
+                                  <Volume2 className="w-3.5 h-3.5 shrink-0" />
+                                )}
+                                <span>
+                                  {isPlayingOriginal
+                                    ? msgLang === 'kn'
+                                      ? 'ಧ್ವನಿ ನಿಲ್ಲಿಸಿ'
+                                      : msgLang === 'te'
+                                      ? 'ఆడియో ఆపండి'
+                                      : 'Stop Audio'
+                                    : msgLang === 'kn'
+                                    ? 'ಕೇಳಿ'
+                                    : msgLang === 'te'
+                                    ? 'వినండి'
+                                    : 'Listen'}
+                                </span>
                               </button>
+
+                              {/* Dedicated Stop Audio button whenever any speech is active on this message or globally */}
+                              {playbackSnap.status !== 'idle' && !isPlayingOriginal && (
+                                <button
+                                  type="button"
+                                  onClick={() => speechService.stop()}
+                                  className="compact-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  <VolumeX className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Stop Audio</span>
+                                </button>
+                              )}
+
+                              {/* Copy */}
+                              <button
+                                type="button"
+                                onClick={() => void handleCopyText(msg.text, msg.id)}
+                                className="compact-chip px-2.5 py-1.5 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#493C39] hover:border-[#C88F98] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                              >
+                                {copiedId === msg.id ? (
+                                  <Check className="w-3.5 h-3.5 text-[#4A6347] shrink-0" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5 text-[#8A6D3F] shrink-0" />
+                                )}
+                                <span>
+                                  {copiedId === msg.id
+                                    ? msgLang === 'kn'
+                                      ? 'ನಕಲಿಸಲಾಗಿದೆ'
+                                      : msgLang === 'te'
+                                      ? 'కాపీ అయింది'
+                                      : 'Copied'
+                                    : msgLang === 'kn'
+                                    ? 'ನಕಲಿಸಿ'
+                                    : msgLang === 'te'
+                                    ? 'కాపీ'
+                                    : 'Copy'}
+                                </span>
+                              </button>
+
+                              {/* Simplify */}
+                              <button
+                                type="button"
+                                disabled={!aiConsentGranted || isLoading}
+                                onClick={() =>
+                                  void sendMessageToGemini(
+                                    `Please simplify this explanation into 2 or 3 very short, reassuring sentences: "${msg.text.slice(
+                                      0,
+                                      500
+                                    )}"`,
+                                    {
+                                      overrideLanguage: msgLang,
+                                      overrideComplexity: 'extra_simple',
+                                      actionIntent: 'simplify',
+                                      suppressUserBubble: true,
+                                    }
+                                  )
+                                }
+                                className="compact-chip px-2.5 py-1.5 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#493C39] hover:border-[#C88F98] disabled:opacity-50 inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                              >
+                                <Zap className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
+                                <span>
+                                  {msgLang === 'kn'
+                                    ? 'ಸರಳಗೊಳಿಸಿ'
+                                    : msgLang === 'te'
+                                    ? 'సులభతరం చేయండి'
+                                    : 'Simplify'}
+                                </span>
+                              </button>
+
+                              {/* Explain Further */}
+                              <button
+                                type="button"
+                                disabled={!aiConsentGranted || isLoading}
+                                onClick={() =>
+                                  void sendMessageToGemini(
+                                    `Please explain this previous guidance in greater detail with organized headings and practical steps: "${msg.text.slice(
+                                      0,
+                                      500
+                                    )}"`,
+                                    {
+                                      overrideLanguage: msgLang,
+                                      overrideComplexity: 'detailed',
+                                      actionIntent: 'elaborate',
+                                      suppressUserBubble: true,
+                                    }
+                                  )
+                                }
+                                className="compact-chip px-2.5 py-1.5 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#493C39] hover:border-[#C88F98] disabled:opacity-50 inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-[#8A6D3F] shrink-0" />
+                                <span>
+                                  {msgLang === 'kn'
+                                    ? 'ಇನ್ನಷ್ಟು ವಿವರಿಸಿ'
+                                    : msgLang === 'te'
+                                    ? 'మరింత వివరించండి'
+                                    : 'Explain Further'}
+                                </span>
+                              </button>
+
+                              {/* Translate */}
+                              <button
+                                type="button"
+                                disabled={!aiConsentGranted || translatingId === msg.id}
+                                onClick={() =>
+                                  setTranslateMenuOpenId((curr) =>
+                                    curr === msg.id ? null : msg.id
+                                  )
+                                }
+                                className={`compact-chip px-2.5 py-1.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50 ${
+                                  translateMenuOpenId === msg.id
+                                    ? 'bg-[#BEA06D] border-[#BEA06D] text-white'
+                                    : 'bg-[#FCF9F5] border-[#BEA06D]/35 text-[#493C39] hover:border-[#C88F98]'
+                                }`}
+                              >
+                                <Languages className="w-3.5 h-3.5 shrink-0" />
+                                <span>
+                                  {translatingId === msg.id
+                                    ? 'Translating...'
+                                    : msgLang === 'kn'
+                                    ? 'ಭಾಷಾಂತರಿಸಿ'
+                                    : msgLang === 'te'
+                                    ? 'అనువదించండి'
+                                    : 'Translate'}
+                                </span>
+                              </button>
+
+                              {msg.suggestedPage && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onPageChange(msg.suggestedPage!);
+                                    onToggleOpen(false);
+                                  }}
+                                  className="compact-chip px-3 py-1.5 rounded-lg bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  <span>
+                                    {msg.suggestedActionLabel || activePageCtx.title[language]}
+                                  </span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Target Language Selector for Translate Action */}
+                            {translateMenuOpenId === msg.id && (
+                              <div className="p-2 rounded-xl bg-[#FCF9F5] border border-[#BEA06D]/35 flex flex-wrap items-center gap-2 text-xs">
+                                <span className="font-semibold text-[#8A6D3F]">Translate to:</span>
+                                {(['en', 'kn', 'te'] as const).map((tLang) => (
+                                  <button
+                                    key={tLang}
+                                    type="button"
+                                    onClick={() => void handleTranslateMessage(msg, tLang)}
+                                    className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/40 hover:border-[#C88F98] font-semibold text-[#493C39] cursor-pointer"
+                                  >
+                                    {getLanguageShortName(tLang)}
+                                  </button>
+                                ))}
+                              </div>
                             )}
+                          </div>
+                        )}
+
+                        {/* Listen action for initial welcome message too */}
+                        {msg.sender === 'assistant' && !isGeneratedAssistant && (
+                          <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-[#BEA06D]/15">
+                            <button
+                              type="button"
+                              onClick={() => handleListenToggle(msg.text, msgLang, msg.id)}
+                              className="compact-chip px-2.5 py-1 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs font-semibold text-[#8A6D3F] hover:bg-[#E6C1C4]/20 inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              {isPlayingOriginal ? (
+                                <VolumeX className="w-3.5 h-3.5 text-[#C88F98]" />
+                              ) : (
+                                <Volume2 className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {isPlayingOriginal
+                                  ? 'Stop Audio'
+                                  : msgLang === 'kn'
+                                  ? 'ಕೇಳಿ'
+                                  : msgLang === 'te'
+                                  ? 'వినండి'
+                                  : 'Listen'}
+                              </span>
+                            </button>
                           </div>
                         )}
 
@@ -1742,10 +2453,16 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                           <button
                             type="button"
                             disabled={isLoading}
-                            onClick={() => void sendMessageToGemini(lastFailedPrompt, { isRetry: true })}
+                            onClick={() =>
+                              void sendMessageToGemini(lastFailedPrompt, { isRetry: true })
+                            }
                             className="mt-2.5 text-sm font-bold text-red-800 underline disabled:opacity-50 cursor-pointer"
                           >
-                            {language === 'kn' ? 'ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ' : language === 'te' ? 'మళ్ళీ ప్రయత్నించండి' : 'Retry'}
+                            {msgLang === 'kn'
+                              ? 'ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ'
+                              : msgLang === 'te'
+                              ? 'మళ్ళీ ప్రయత్నించండి'
+                              : 'Retry'}
                           </button>
                         )}
                       </div>
@@ -1756,13 +2473,19 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                 {isLoading && (
                   <AiSkeletonLoader
                     label={
-                      language === 'kn'
+                      chatLanguage === 'kn'
                         ? 'CORE AI ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ...'
-                        : language === 'te'
+                        : chatLanguage === 'te'
                         ? 'CORE AI సమాధానం సిద్ధం చేస్తోంది...'
                         : 'CORE AI is composing a gentle response...'
                     }
                   />
+                )}
+
+                {actionFeedbackError && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900">
+                    {actionFeedbackError}
+                  </div>
                 )}
 
                 {showScrollToBottom && (
@@ -1774,15 +2497,153 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
                       <span>
-                        {language === 'kn' ? 'ಹೊಸ ಉತ್ತರ' : language === 'te' ? 'కొత్త సందేశం' : 'Latest'}
+                        {chatLanguage === 'kn'
+                          ? 'ಹೊಸ ಉತ್ತರ'
+                          : chatLanguage === 'te'
+                          ? 'కొత్త సందేశం'
+                          : 'Latest'}
                       </span>
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Compact Bottom Composer & Collapsible Suggestions */}
+              {/* Compact Bottom Composer, Voice Playback/Listening Bar & Collapsible Suggestions */}
               <div className="shrink-0 bg-white border-t border-[#BEA06D]/25">
+                {/* Active TTS Playback Bar (Pause / Resume / Replay / Stop Audio) */}
+                {playbackSnap.status !== 'idle' && (
+                  <div className="px-3.5 sm:px-5 py-2 bg-[#FCF9F5] border-b border-[#BEA06D]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 text-[#493C39] font-semibold">
+                      <div className="flex items-center gap-0.5 h-4" aria-hidden="true">
+                        {[1, 2, 3, 4].map((b) => (
+                          <span
+                            key={b}
+                            className={`w-1 rounded-full bg-[#C88F98] ${
+                              playbackSnap.status === 'speaking' && !reduceMotion
+                                ? 'wave-bar'
+                                : 'h-2 opacity-60'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <span>
+                        {playbackSnap.status === 'paused'
+                          ? 'Audio paused'
+                          : `Speaking (${getLanguageShortName(playbackSnap.activeLang || chatLanguage)})`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          playbackSnap.status === 'paused'
+                            ? speechService.resume()
+                            : speechService.pause()
+                        }
+                        className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[#493C39] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        {playbackSnap.status === 'paused' ? (
+                          <Play className="w-3 h-3" />
+                        ) : (
+                          <Pause className="w-3 h-3" />
+                        )}
+                        <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => speechService.replay()}
+                        className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[#8A6D3F] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Replay</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => speechService.stop()}
+                        className="compact-chip px-2.5 py-1 rounded-lg bg-[#C88F98] text-white font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <VolumeX className="w-3 h-3" />
+                        <span>Stop Audio</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Gentle Blush Listening State Bar */}
+                {isListening && (
+                  <div className="px-3.5 sm:px-5 py-2 bg-[#E6C1C4]/28 border-b border-[#C88F98]/50 flex items-center justify-between gap-2 text-xs text-[#493C39]">
+                    <div className="flex items-center gap-2.5">
+                      <span className="relative flex h-2.5 w-2.5">
+                        {!reduceMotion && (
+                          <span className="voice-ring absolute inline-flex h-full w-full rounded-full bg-[#C88F98]" />
+                        )}
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#C88F98]" />
+                      </span>
+                      <span className="font-semibold">
+                        Listening in {getLanguageShortName(chatLanguage)}... Speak clearly, then
+                        review or edit below.
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 h-4" aria-hidden="true">
+                      {[1, 2, 3, 4, 5].map((bar) => (
+                        <span
+                          key={bar}
+                          className={`w-1 rounded-full bg-[#C88F98] ${
+                            !reduceMotion ? 'wave-bar' : 'h-2 opacity-60'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Voice Error / Unsupported Browser Notice */}
+                {voiceStatusMessage && (
+                  <div className="px-3.5 sm:px-5 py-2 bg-[#FCF9F5] border-b border-[#E6C1C4] flex items-center justify-between gap-2 text-xs text-[#493C39]">
+                    <span>{voiceStatusMessage}</span>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceStatusMessage(null)}
+                      className="text-[#8A6D3F] font-semibold underline shrink-0 cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+
+                {/* Live Mixed-Language Input Detection Choice Banner */}
+                {suggestedInputLanguage && (
+                  <div className="px-3.5 sm:px-5 py-2 bg-[#E6C1C4]/20 border-b border-[#C88F98]/40 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-[#493C39] font-medium">
+                      {suggestedInputLanguage === 'kn'
+                        ? 'Kannada detected · Would you like the answer in Kannada?'
+                        : suggestedInputLanguage === 'te'
+                        ? 'Telugu detected · Would you like the answer in Telugu?'
+                        : 'English detected · Would you like the answer in English?'}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChatLanguage(suggestedInputLanguage);
+                          setDismissedMismatchForLang(null);
+                        }}
+                        className="compact-chip px-2.5 py-1 rounded-lg bg-[#C88F98] hover:bg-[#b27882] text-white font-semibold cursor-pointer whitespace-nowrap"
+                      >
+                        Answer in {getLanguageShortName(suggestedInputLanguage)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDismissedMismatchForLang(suggestedInputLanguage)}
+                        className="compact-chip px-2.5 py-1 rounded-lg bg-white border border-[#BEA06D]/35 text-[#493C39] font-semibold cursor-pointer whitespace-nowrap"
+                      >
+                        Keep {getLanguageShortName(chatLanguage)}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Collapsible Suggestions Header Strip */}
                 <div className="px-3.5 sm:px-5 py-1.5 border-b border-[#BEA06D]/15 bg-[#FCF9F5]/75 flex items-center justify-between gap-2">
                   <button
@@ -1793,9 +2654,9 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   >
                     <Sparkles className="w-3.5 h-3.5 text-[#C88F98] shrink-0" />
                     <span>
-                      {language === 'kn'
+                      {chatLanguage === 'kn'
                         ? 'ಸೂಚಿಸಿದ ಪ್ರಶ್ನೆಗಳು'
-                        : language === 'te'
+                        : chatLanguage === 'te'
                         ? 'సూచించిన ప్రశ్నలు'
                         : 'Suggestions'}
                     </span>
@@ -1810,9 +2671,9 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   </button>
 
                   <span className="text-[11px] text-[#493C39]/70 truncate">
-                    {language === 'kn'
+                    {chatLanguage === 'kn'
                       ? 'AI ಮಾರ್ಗದರ್ಶಿ · ವೈದ್ಯರಲ್ಲ'
-                      : language === 'te'
+                      : chatLanguage === 'te'
                       ? 'AI గైడ్ · డాక్టర్ కాదు'
                       : 'AI Guide · Verify clinical care with staff'}
                   </span>
@@ -1827,21 +2688,44 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                           key={`${currentPage}-ctx-${idx}`}
                           type="button"
                           disabled={!aiConsentGranted || isLoading}
-                          onClick={() => void sendMessageToGemini(promptObj[language])}
+                          onClick={() => void sendMessageToGemini(promptObj[chatLanguage])}
                           className="compact-chip text-left text-xs sm:text-[13px] px-3 py-1.5 rounded-xl bg-white hover:bg-[#E6C1C4]/20 disabled:opacity-50 border border-[#BEA06D]/35 text-[#493C39] font-medium transition-colors cursor-pointer"
                         >
-                          {promptObj[language]}
+                          {promptObj[chatLanguage]}
                         </button>
                       ))}
                     </div>
                   </div>
                 </div>
 
-                {/* Message Composer Input */}
+                {/* Message Composer Input with Integrated Microphone Button */}
                 <form
                   onSubmit={handleSubmit}
                   className="px-3.5 py-2.5 sm:px-4 sm:py-3 flex items-end gap-2 pb-[max(0.625rem,env(safe-area-inset-bottom))]"
                 >
+                  <button
+                    type="button"
+                    onClick={handleToggleVoiceDictation}
+                    disabled={isLoading}
+                    aria-label={isListening ? 'Stop voice input' : 'Speak question with microphone'}
+                    title={
+                      isListening
+                        ? 'Stop listening'
+                        : `Speak in ${getLanguageShortName(chatLanguage)}`
+                    }
+                    className={`compact-chip min-w-[44px] min-h-[44px] p-2.5 rounded-xl border inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                      isListening
+                        ? 'bg-[#E6C1C4]/50 border-[#C88F98] text-[#493C39]'
+                        : 'bg-[#FCF9F5] border-[#BEA06D]/45 text-[#8A6D3F] hover:border-[#C88F98] hover:bg-[#E6C1C4]/20'
+                    }`}
+                  >
+                    {isListening ? (
+                      <MicOff className="w-4 h-4 text-[#C88F98]" />
+                    ) : (
+                      <Mic className="w-4 h-4" />
+                    )}
+                  </button>
+
                   <textarea
                     ref={textareaRef}
                     rows={1}
@@ -1852,19 +2736,23 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                     onKeyDown={handleTextareaKeyDown}
                     placeholder={
                       !aiConsentGranted
-                        ? language === 'kn'
+                        ? chatLanguage === 'kn'
                           ? 'ಮೊದಲು ಮೇಲಿನ AI ಸಮ್ಮತಿಯನ್ನು ಒಪ್ಪಿಕೊಳ್ಳಿ...'
-                          : language === 'te'
+                          : chatLanguage === 'te'
                           ? 'ముందుగా పైన AI అనుమతిని ఆమోదించండి...'
                           : 'Accept AI consent above to ask...'
-                        : language === 'kn'
-                        ? 'ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ...'
-                        : language === 'te'
-                        ? 'మీ ప్రశ్నను టైప్ చేయండి...'
-                        : 'Ask about navigation, visit prep, or terms...'
+                        : chatLanguage === 'kn'
+                        ? 'ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮೈಕ್ ಬಳಸಿ...'
+                        : chatLanguage === 'te'
+                        ? 'మీ ప్రశ్నను టైప్ చేయండి లేదా మైక్ వాడండి...'
+                        : 'Ask a question or tap mic to speak...'
                     }
-                    className="flex-1 min-h-[44px] max-h-[108px] resize-none px-3.5 py-2.5 rounded-xl border border-[#BEA06D]/45 bg-[#FCF9F5] text-base text-[#322826] leading-snug focus:outline-none focus:ring-2 focus:ring-[#BEA06D] disabled:opacity-60"
+                    className={`flex-1 min-h-[44px] max-h-[108px] resize-none px-3.5 py-2.5 rounded-xl border border-[#BEA06D]/45 bg-[#FCF9F5] text-base text-[#322826] leading-snug focus:outline-none focus:ring-2 focus:ring-[#BEA06D] disabled:opacity-60 ${getScriptFontClass(
+                      inputText,
+                      chatLanguage
+                    )}`}
                   />
+
                   <button
                     type="submit"
                     disabled={!aiConsentGranted || isLoading || !inputText.trim()}
