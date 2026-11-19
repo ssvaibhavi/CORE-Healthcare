@@ -164,6 +164,10 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    speechService.setCloudConsentGranted(aiConsentGranted);
+  }, [aiConsentGranted]);
+
   const effectiveMotionMode =
     comfortSettings.motionMode ?? (comfortSettings.reduceMotion ? 'none' : 'full');
 
@@ -422,6 +426,7 @@ export default function App() {
             completedTasks={completedTasks}
             onToggleTask={handleToggleTask}
             aiConsentGranted={aiConsentGranted}
+            onAcceptAiConsent={() => setAiConsentGranted(true)}
           />
         )}
 
@@ -653,19 +658,39 @@ export default function App() {
           <div
             role="status"
             aria-live="polite"
-            className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-md z-40 no-print bg-[#FCF9F5] border border-[#C88F98] rounded-2xl shadow-lg p-3.5 flex items-start justify-between gap-3 text-xs text-[#493C39] modal-soft-enter"
+            className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-md z-40 no-print bg-[#FCF9F5] border border-[#C88F98] rounded-2xl shadow-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-[#493C39] modal-soft-enter"
           >
-            <div className="flex items-start gap-2.5">
+            <div className="flex items-start gap-2.5 flex-1 min-w-[200px]">
               <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
               <span className="leading-relaxed">{globalAudioError.message}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => speechService.clearError()}
-              className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
-            >
-              {currentLanguage === 'kn' ? 'ಮುಚ್ಚಿ' : currentLanguage === 'te' ? 'మూసివేయండి' : 'Dismiss'}
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {globalAudioError.code === 'cloud-consent-required' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAiConsentGranted(true);
+                    speechService.setCloudConsentGranted(true);
+                    speechService.clearError();
+                    speechService.replay();
+                  }}
+                  className="px-3 py-1 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white font-semibold cursor-pointer"
+                >
+                  {currentLanguage === 'kn'
+                    ? 'Gemini ಧ್ವನಿ ಸಕ್ರಿಯಗೊಳಿಸಿ'
+                    : currentLanguage === 'te'
+                    ? 'Gemini వాయిస్ ఆన్ చేయండి'
+                    : 'Enable Gemini Voice'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => speechService.clearError()}
+                className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
+              >
+                {currentLanguage === 'kn' ? 'ಮುಚ್ಚಿ' : currentLanguage === 'te' ? 'మూసివేయండి' : 'Dismiss'}
+              </button>
+            </div>
           </div>
         )}
 

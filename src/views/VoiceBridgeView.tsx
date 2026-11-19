@@ -35,6 +35,7 @@ import {
   Check,
   Copy,
   AlertCircle,
+  Loader2,
 } from 'lucide-react';
 
 interface VoiceBridgeViewProps {
@@ -165,10 +166,12 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
   const mismatchedLang =
     detection.detected && detection.detected !== currentLanguage ? detection.detected : null;
 
-  const visualState: 'listening' | 'thinking' | 'speaking' | 'paused' | 'idle' = isListening
+  const visualState: 'listening' | 'thinking' | 'loading-audio' | 'speaking' | 'paused' | 'idle' = isListening
     ? 'listening'
     : isThinking
     ? 'thinking'
+    : playbackSnap.status === 'loading'
+    ? 'loading-audio'
     : playbackSnap.status === 'speaking'
     ? 'speaking'
     : playbackSnap.status === 'paused'
@@ -559,13 +562,15 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
                     Spoken Voice:{' '}
                     <span
                       className={`font-semibold ${
-                        sup.nativeTtsVoiceAvailable ? 'text-[#4A6347]' : 'text-[#8A6D3F]'
+                        sup.nativeTtsVoiceAvailable || sup.cloudTtsAvailable
+                          ? 'text-[#4A6347]'
+                          : 'text-[#8A6D3F]'
                       }`}
                     >
                       {sup.nativeTtsVoiceAvailable
-                        ? `Available (${sup.ttsVoiceName?.slice(0, 22)})`
+                        ? `Browser Voice (${sup.ttsVoiceName?.slice(0, 22)})`
                         : sup.cloudTtsAvailable
-                        ? 'Cloud Audio Ready'
+                        ? `${sup.cloudProviderLabel || 'Gemini TTS'} Ready`
                         : sup.ttsApiAvailable
                         ? 'No OS Voice Pack Detected'
                         : 'TTS Unsupported'}
@@ -627,48 +632,61 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <div className="text-sm sm:text-base font-bold text-[#493C39]">
-                {visualState === 'listening'
-                  ? currentLanguage === 'kn'
-                    ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ... ಮಾತನಾಡಿ'
+              <div className="text-sm sm:text-base font-bold text-[#493C39] flex flex-wrap items-center gap-2">
+                <span>
+                  {visualState === 'listening'
+                    ? currentLanguage === 'kn'
+                      ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ... ಮಾತನಾಡಿ'
+                      : currentLanguage === 'te'
+                      ? 'వింటోంది... దయచేసి మాట్లాడండి'
+                      : `Listening (${getSpeechRecognitionLocale(currentLanguage)})... Speak clearly`
+                    : visualState === 'thinking'
+                    ? currentLanguage === 'kn'
+                      ? 'Gemini ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ...'
+                      : currentLanguage === 'te'
+                      ? 'Gemini సమాధానం సిద్ధం చేస్తోంది...'
+                      : 'Thinking... Composing gentle response'
+                    : visualState === 'loading-audio'
+                    ? `Preparing Audio (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})...`
+                    : visualState === 'speaking'
+                    ? `Speaking (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})`
+                    : visualState === 'paused'
+                    ? `Audio paused (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})`
+                    : currentLanguage === 'kn'
+                    ? `ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ (${getAudioLanguageBadge(currentLanguage)})`
                     : currentLanguage === 'te'
-                    ? 'వింటోంది... దయచేసి మాట్లాడండి'
-                    : `Listening (${getSpeechRecognitionLocale(currentLanguage)})... Speak clearly`
-                  : visualState === 'thinking'
-                  ? currentLanguage === 'kn'
-                    ? 'Gemini ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ...'
-                    : currentLanguage === 'te'
-                    ? 'Gemini సమాధానం సిద్ధం చేస్తోంది...'
-                    : 'Thinking... Composing gentle response'
-                  : visualState === 'speaking'
-                  ? `Speaking (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})`
-                  : visualState === 'paused'
-                  ? `Audio paused (${getAudioLanguageBadge(playbackSnap.activeLang || lastSpokenLang)})`
-                  : currentLanguage === 'kn'
-                  ? `ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ (${getAudioLanguageBadge(currentLanguage)})`
-                  : currentLanguage === 'te'
-                  ? `మాట్లాడటానికి మైక్ నొక్కండి లేదా క్రింద టైప్ చేయండి (${getAudioLanguageBadge(currentLanguage)})`
-                  : `Tap microphone to speak, or type below (${getAudioLanguageBadge(currentLanguage)})`}
+                    ? `మాట్లాడటానికి మైక్ నొక్కండి లేదా క్రింద టైప్ చేయండి (${getAudioLanguageBadge(currentLanguage)})`
+                    : `Tap microphone to speak, or type below (${getAudioLanguageBadge(currentLanguage)})`}
+                </span>
+                {playbackSnap.activeEngineLabel && playbackSnap.status !== 'idle' && (
+                  <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-white border border-[#BEA06D]/35 text-[#8A6D3F]">
+                    {playbackSnap.activeEngineLabel}
+                  </span>
+                )}
               </div>
 
               {/* Soft Waveform Animation (Active during Listening or Speaking, static when reduceMotion) */}
               <div className="flex items-center gap-1 h-6" aria-hidden="true">
-                {[1, 2, 3, 4, 5].map((bar) => (
-                  <span
-                    key={bar}
-                    className={`w-1.5 rounded-full transition-all ${
-                      visualState === 'listening'
-                        ? 'bg-[#C88F98]'
-                        : visualState === 'speaking'
-                        ? 'bg-[#4A6347]'
-                        : 'bg-[#BEA06D]'
-                    } ${
-                      (visualState === 'listening' || visualState === 'speaking') && !reduceMotion
-                        ? 'wave-bar'
-                        : 'h-2 opacity-40'
-                    }`}
-                  />
-                ))}
+                {visualState === 'loading-audio' ? (
+                  <Loader2 className="w-4 h-4 text-[#C88F98] animate-spin" />
+                ) : (
+                  [1, 2, 3, 4, 5].map((bar) => (
+                    <span
+                      key={bar}
+                      className={`w-1.5 rounded-full transition-all ${
+                        visualState === 'listening'
+                          ? 'bg-[#C88F98]'
+                          : visualState === 'speaking'
+                          ? 'bg-[#4A6347]'
+                          : 'bg-[#BEA06D]'
+                      } ${
+                        (visualState === 'listening' || visualState === 'speaking') && !reduceMotion
+                          ? 'wave-bar'
+                          : 'h-2 opacity-40'
+                      }`}
+                    />
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -677,22 +695,24 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             {playbackSnap.status !== 'idle' && (
               <>
-                <button
-                  type="button"
-                  onClick={() =>
-                    playbackSnap.status === 'paused'
-                      ? speechService.resume()
-                      : speechService.pause()
-                  }
-                  className="compact-chip py-2 px-3.5 rounded-full bg-white border border-[#BEA06D]/45 text-xs font-bold text-[#493C39] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  {playbackSnap.status === 'paused' ? (
-                    <Play className="w-3.5 h-3.5" />
-                  ) : (
-                    <Pause className="w-3.5 h-3.5" />
-                  )}
-                  <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
-                </button>
+                {playbackSnap.status !== 'loading' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      playbackSnap.status === 'paused'
+                        ? speechService.resume()
+                        : speechService.pause()
+                    }
+                    className="compact-chip py-2 px-3.5 rounded-full bg-white border border-[#BEA06D]/45 text-xs font-bold text-[#493C39] inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {playbackSnap.status === 'paused' ? (
+                      <Play className="w-3.5 h-3.5" />
+                    ) : (
+                      <Pause className="w-3.5 h-3.5" />
+                    )}
+                    <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -817,9 +837,26 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
         </div>
 
         {recognitionNotice && (
-          <div className="p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#C88F98] text-xs sm:text-sm text-[#493C39] flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
-            <span>{recognitionNotice}</span>
+          <div className="p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#C88F98] text-xs sm:text-sm text-[#493C39] flex flex-wrap items-start justify-between gap-2.5">
+            <div className="flex items-start gap-2 flex-1 min-w-0">
+              <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
+              <span className="break-words">{recognitionNotice}</span>
+            </div>
+            {!aiConsentGranted && playbackSnap.lastError?.code === 'cloud-consent-required' && (
+              <button
+                type="button"
+                onClick={() => {
+                  onAcceptAiConsent?.();
+                  speechService.setCloudConsentGranted(true);
+                  setRecognitionNotice(null);
+                  speechService.clearError();
+                  speechService.replay();
+                }}
+                className="compact-chip px-3 py-1 rounded-full bg-[#4A6347] hover:bg-[#3b5038] text-white text-xs font-semibold cursor-pointer shrink-0"
+              >
+                Enable Gemini Voice
+              </button>
+            )}
           </div>
         )}
 

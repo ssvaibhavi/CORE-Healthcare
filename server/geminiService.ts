@@ -10,6 +10,7 @@ export interface AiServiceHttpError {
 }
 
 const MODEL_ID = 'gemini-4-hydrogen';
+const TTS_MODEL_ID = 'gemini-3.8-flash-lite-tts';
 const MAX_INPUT_CHARS = 1200;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 25;
@@ -34,7 +35,7 @@ export function checkRateLimit(clientKey: string): { allowed: boolean; retryAfte
   return { allowed: true };
 }
 
-function getGeminiClient(): GoogleGenAI {
+function getGeminiClient(apiVersion?: string): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     const err: AiServiceHttpError = {
@@ -48,6 +49,7 @@ function getGeminiClient(): GoogleGenAI {
 
   return new GoogleGenAI({
     apiKey,
+    ...(apiVersion ? { apiVersion } : {}),
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -233,7 +235,8 @@ const TOTAL_RETRY_BUDGET_MS = 50_000;
 
 async function callWithExponentialBackoff<T>(
   operation: string,
-  fn: (signal: AbortSignal) => Promise<T>
+  fn: (signal: AbortSignal) => Promise<T>,
+  modelName = MODEL_ID
 ): Promise<T> {
   const startedAt = Date.now();
   const attempts: AiAttemptDiagnostic[] = [];
@@ -254,14 +257,14 @@ async function callWithExponentialBackoff<T>(
       const result = await fn(AbortSignal.timeout(attemptTimeout));
       attempts.push({
         attempt: retryIdx + 1,
-        model: MODEL_ID,
+        model: modelName,
         durationMs: Date.now() - attemptStart,
         outcome: 'ok',
       });
       lastAiDiagnostic = {
         timestamp: new Date().toISOString(),
         operation,
-        model: MODEL_ID,
+        model: modelName,
         attempts,
         mappedStatus: 200,
         mappedCode: 'OK',
@@ -275,7 +278,7 @@ async function callWithExponentialBackoff<T>(
 
       attempts.push({
         attempt: retryIdx + 1,
-        model: MODEL_ID,
+        model: modelName,
         durationMs: Date.now() - attemptStart,
         outcome: 'error',
         upstreamStatus,
@@ -306,11 +309,11 @@ async function callWithExponentialBackoff<T>(
     }
   }
 
-  const mapped = mapGeminiError(lastError, { log: false });
+  const mapped = mapGeminiError(lastError, { log: false, modelName });
   lastAiDiagnostic = {
     timestamp: new Date().toISOString(),
     operation,
-    model: MODEL_ID,
+    model: modelName,
     attempts,
     mappedStatus: mapped.status,
     mappedCode: mapped.code,
@@ -320,8 +323,9 @@ async function callWithExponentialBackoff<T>(
 
 export function mapGeminiError(
   err: unknown,
-  options: { log?: boolean } = { log: true }
+  options: { log?: boolean; modelName?: string } = { log: true }
 ): AiServiceHttpError {
+  const activeModel = options.modelName || MODEL_ID;
   if (
     typeof err === 'object' &&
     err !== null &&
@@ -398,7 +402,7 @@ export function mapGeminiError(
     return {
       status: 502,
       code: 'AI_MODEL_UNAVAILABLE',
-      message: `The configured Gemini model (${MODEL_ID}) could not be found right now.`,
+      message: `The configured Gemini model (${activeModel}) could not be found right now.`,
     };
   }
   if (upstreamStatus === 400 || lower.includes('invalid_argument')) {
@@ -412,7 +416,7 @@ export function mapGeminiError(
     return {
       status: 503,
       code: 'AI_SERVICE_BUSY',
-      message: `Google Gemini (${MODEL_ID}) is temporarily overloaded due to high demand. Your message was not lost — please wait ${retryHintSec ? `about ${retryHintSec} seconds` : 'a few seconds'} and tap Retry.`,
+      message: `Google Gemini (${activeModel}) is temporarily overloaded due to high demand. Your request was not lost — please wait ${retryHintSec ? `about ${retryHintSec} seconds` : 'a few seconds'} and tap Retry.`,
     };
   }
   if (
@@ -910,7 +914,7 @@ export function getTtsCapabilities(): TtsCapabilities {
 
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   if (
-    process.env.ENABLE_GEMINI_TTS === 'true' &&
+    process.env.DISABLE_GEMINI_TTS !== 'true' &&
     geminiKey &&
     geminiKey !== 'MY_GEMINI_API_KEY'
   ) {
@@ -951,7 +955,7 @@ export async function runTtsAi(payload: TtsRequestPayload) {
 
   const language = normalizeLanguage(payload.language);
   const locale = getLocaleForLanguage(language);
-  const rawRate = typeof payload.rate === 'number' ? payload.rate : 0.95;
+  const rawRate = typeof payload.rate === 'number' ? payload.rate : 0.9;
   const speakingRate = Math.min(1.25, Math.max(0.75, rawRate));
   const caps = getTtsCapabilities();
 
@@ -960,7 +964,7 @@ export async function runTtsAi(payload: TtsRequestPayload) {
       status: 503,
       code: 'TTS_NOT_CONFIGURED',
       message:
-        'Optional Cloud Text-to-Speech is not configured on the server. Set GOOGLE_CLOUD_TTS_API_KEY (or ENABLE_GEMINI_TTS=true) in server secrets to enable cloud speech when browser voices are absent.',
+        'Server Text-to-Speech is not configured. Set GEMINI_API_KEY (or GOOGLE_CLOUD_TTS_API_KEY) in server secrets to enable voice generation when browser voices are absent.',
     };
     throw err;
   }
@@ -1009,47 +1013,60 @@ export async function runTtsAi(payload: TtsRequestPayload) {
       language,
       locale,
       provider: 'google-cloud-tts' as const,
+      model: 'google-cloud-tts-v1',
     };
   }
 
-  // Opt-in Gemini 3.8 Flash Lite TTS fallback
-  const ai = getGeminiClient();
-  const response = await callWithExponentialBackoff('tts', (abortSignal) =>
-    ai.models.generateContent({
-      model: 'gemini-3.8-flash-lite-tts',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text,
-              speechMetadata: {
-                style: `Calm, compassionate, clear healthcare guide speaking strictly in ${languageName(
-                  language
-                )} (${locale}) at a comfortable pace.`,
+  // Reuses the configured GEMINI_API_KEY with Gemini 3.8 Flash Lite TTS (standard API tier, v1beta for speechConfig/speechMetadata)
+  const ai = getGeminiClient('v1beta');
+  const paceCue =
+    speakingRate <= 0.8
+      ? 'very gentle, unhurried, slow pace'
+      : speakingRate < 0.95
+      ? 'calm, steady, unhurried pace'
+      : 'natural clear pace';
+
+  const response = await callWithExponentialBackoff(
+    'tts',
+    (abortSignal) =>
+      ai.models.generateContent({
+        model: TTS_MODEL_ID,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text,
+                speechMetadata: {
+                  style: `Warm, patient, articulate healthcare guide speaking strictly in ${languageName(
+                    language
+                  )} (${locale}) at a ${paceCue}. Pronounce every word clearly for elderly patients.`,
+                },
               },
+            ],
+          },
+        ],
+        config: {
+          abortSignal,
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' },
             },
-          ],
-        },
-      ],
-      config: {
-        abortSignal,
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
           },
         },
-      },
-    })
+      }),
+    TTS_MODEL_ID
   );
 
-  const inline = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  const audioPart = parts.find((p) => Boolean(p?.inlineData?.data));
+  const inline = audioPart?.inlineData;
   if (!inline?.data) {
     const err: AiServiceHttpError = {
       status: 502,
       code: 'TTS_EMPTY_AUDIO',
-      message: `Cloud speech generation returned no audio for ${locale}.`,
+      message: `Gemini TTS (${TTS_MODEL_ID}) returned no playable audio for ${locale}.`,
     };
     throw err;
   }
@@ -1060,6 +1077,7 @@ export async function runTtsAi(payload: TtsRequestPayload) {
     language,
     locale,
     provider: 'gemini-tts' as const,
+    model: TTS_MODEL_ID,
   };
 }
 

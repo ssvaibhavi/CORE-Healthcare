@@ -293,7 +293,7 @@ export const CareCompassView: React.FC<CareCompassViewProps> = ({
           </div>
 
         {/* Organizational Task Readiness Gauge (Explicitly Non-Clinical) */}
-        <div className="bg-white border-2 border-[#BEA06D]/45 rounded-2xl p-4 min-w-[250px] shadow-xs space-y-2">
+        <div className="bg-white border-2 border-[#BEA06D]/45 rounded-2xl p-4 w-full sm:w-auto sm:min-w-[250px] shadow-xs space-y-2">
           <div className="flex items-center justify-between text-xs font-bold">
             <span className="text-[#8F7242]">
               {currentLanguage === 'kn'

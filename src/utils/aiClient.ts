@@ -196,11 +196,13 @@ export interface TtsAiResponse {
   language: Language;
   locale: 'en-IN' | 'kn-IN' | 'te-IN';
   provider: 'google-cloud-tts' | 'gemini-tts';
+  model?: string;
 }
 
 export interface AiHealthStatus {
   aiConfigured: boolean;
   ttsConfigured: boolean;
+  ttsProviders: Array<'google-cloud-tts' | 'gemini-tts'>;
 }
 
 let cachedHealthStatus: AiHealthStatus | null = null;
@@ -218,14 +220,26 @@ export async function fetchAiHealthStatus(forceRefresh = false): Promise<AiHealt
     try {
       const res = await fetch('/api/health');
       const json = await res.json().catch(() => ({}));
+      const providers = Array.isArray(json?.ttsProviders)
+        ? (json.ttsProviders.filter(
+            (p: unknown) => p === 'google-cloud-tts' || p === 'gemini-tts'
+          ) as Array<'google-cloud-tts' | 'gemini-tts'>)
+        : [];
       const status: AiHealthStatus = {
         aiConfigured: Boolean(json?.aiConfigured),
         ttsConfigured: Boolean(json?.ttsConfigured),
+        ttsProviders: providers,
       };
       cachedHealthStatus = status;
       return status;
     } catch {
-      return cachedHealthStatus || { aiConfigured: false, ttsConfigured: false };
+      return (
+        cachedHealthStatus || {
+          aiConfigured: false,
+          ttsConfigured: false,
+          ttsProviders: [],
+        }
+      );
     } finally {
       pendingHealthPromise = null;
     }

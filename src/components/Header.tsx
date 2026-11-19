@@ -206,12 +206,12 @@ export const Header: React.FC<HeaderProps> = ({
       ];
 
   return (
-    <header className="sticky top-0 z-40 bg-[#FCF9F5]/95 backdrop-blur-md border-b border-[#BEA06D]/30 transition-colors no-print">
+    <header className="sticky top-0 z-40 max-w-full overflow-x-clip bg-[#FCF9F5]/95 backdrop-blur-md border-b border-[#BEA06D]/30 transition-colors no-print">
       {/* Top utility bar for Accessibility & Comfort Mode */}
-      <div className="bg-[#BEA06D]/15 border-b border-[#BEA06D]/20 px-4 py-1.5 text-xs text-[#3C3330]">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <span className="font-medium text-[#8F7242]">
+      <div className="bg-[#BEA06D]/15 border-b border-[#BEA06D]/20 px-3 sm:px-4 py-1.5 text-xs text-[#3C3330]">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <span className="font-medium text-[#8F7242] truncate max-w-[210px] sm:max-w-none">
               {t.tagline}
             </span>
             {comfortSettings.guidedMode && (
@@ -349,27 +349,27 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Main Navigation Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20 gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between min-h-20 py-2 gap-2 sm:gap-3 min-w-0">
           {/* Zone 1: Logo & Brand Lockup */}
           <button
             onClick={() => onPageChange('home')}
-            className="flex items-center gap-3.5 text-left group shrink-0 focus:outline-none cursor-pointer"
+            className="flex items-center gap-2.5 sm:gap-3.5 text-left group shrink-0 focus:outline-none cursor-pointer"
             aria-label="CORE Home"
           >
             <CoreMonogramMark size="md" className="group-hover:scale-105 transition-transform duration-300" />
             <div className="flex flex-col">
-              <span className="font-display text-2xl sm:text-3xl font-bold tracking-wider text-[#493C39] leading-none group-hover:text-[#8A6D3F] transition-colors">
+              <span className="font-display text-xl sm:text-3xl font-bold tracking-wider text-[#493C39] leading-none group-hover:text-[#8A6D3F] transition-colors">
                 CORE
               </span>
-              <span className="text-[10px] sm:text-xs text-[#C88F98] font-medium tracking-tight mt-0.5">
+              <span className="text-[10px] sm:text-xs text-[#C88F98] font-medium tracking-tight mt-0.5 whitespace-nowrap">
                 {currentLanguage === 'kn' ? 'ಆರೋಗ್ಯ ಸೇತು' : currentLanguage === 'te' ? 'ఆరోగ్య సంరక్షణ' : 'Rosewater Care'}
               </span>
             </div>
           </button>
 
           {/* Zone 2: Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-6 xl:gap-8 text-sm font-medium text-[#3C3330]">
+          <nav className="hidden lg:flex items-center justify-center flex-wrap gap-x-3.5 xl:gap-x-6 gap-y-1 text-[13px] xl:text-sm font-medium text-[#3C3330] min-w-0">
             {navLinks.map((item) => (
               <button
                 key={item.id}
@@ -389,12 +389,12 @@ export const Header: React.FC<HeaderProps> = ({
           </nav>
 
           {/* Zone 3: Language Selector & Mobile Menu */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Prominent Three-Language Selector: English | Kannada | Telugu */}
-            <div className="inline-flex items-center bg-white border-2 border-[#BEA06D]/40 rounded-full p-1 shadow-sm">
+            <div className="inline-flex items-center bg-white border-2 border-[#BEA06D]/40 rounded-full p-0.5 sm:p-1 shadow-sm">
               <button
                 onClick={() => onLanguageChange('en')}
-                className={`compact-chip px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                className={`compact-chip px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-medium transition-all cursor-pointer ${
                   currentLanguage === 'en'
                     ? 'bg-[#BEA06D] text-white shadow-sm font-semibold'
                     : 'text-[#3C3330] hover:text-[#8F7242]'
@@ -405,7 +405,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
               <button
                 onClick={() => onLanguageChange('kn')}
-                className={`compact-chip px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                className={`compact-chip px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-medium transition-all cursor-pointer ${
                   currentLanguage === 'kn'
                     ? 'bg-[#BEA06D] text-white shadow-sm font-semibold'
                     : 'text-[#3C3330] hover:text-[#8F7242]'
@@ -416,7 +416,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
               <button
                 onClick={() => onLanguageChange('te')}
-                className={`compact-chip px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                className={`compact-chip px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-medium transition-all cursor-pointer ${
                   currentLanguage === 'te'
                     ? 'bg-[#BEA06D] text-white shadow-sm font-semibold'
                     : 'text-[#3C3330] hover:text-[#8F7242]'

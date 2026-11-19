@@ -1,5 +1,5 @@
 import { Language } from '../types';
-import { AiClientError, fetchAiHealthStatus, synthesizeCloudSpeech } from './aiClient';
+import { AiClientError, fetchAiHealthStatus, formatAiErrorMessage, synthesizeCloudSpeech } from './aiClient';
 
 export type SpeechRate = 0.75 | 0.9 | 1.0;
 
@@ -39,6 +39,7 @@ export interface SpeechPlaybackSnapshot {
   activeLocale: 'en-IN' | 'kn-IN' | 'te-IN' | null;
   activeVoiceName: string | null;
   activeSource: 'browser' | 'cloud' | null;
+  activeEngineLabel: string | null;
   activeText: string | null;
   rate: number;
   lastError: SpeechErrorInfo | null;
@@ -51,6 +52,7 @@ export interface LanguageVoiceSupport {
   nativeTtsVoiceAvailable: boolean;
   ttsVoiceName?: string;
   cloudTtsAvailable: boolean;
+  cloudProviderLabel?: string;
   sttApiAvailable: boolean;
 }
 
@@ -68,6 +70,36 @@ export function getAudioLanguageBadge(lang: Language): string {
   if (lang === 'kn') return 'ಕನ್ನಡ (kn-IN)';
   if (lang === 'te') return 'తెలుగు (te-IN)';
   return 'English (en-IN)';
+}
+
+export function getCloudProviderDisplayLabel(
+  providers: readonly ('google-cloud-tts' | 'gemini-tts')[]
+): string | undefined {
+  if (providers.includes('google-cloud-tts')) {
+    return 'Google Cloud TTS';
+  }
+  if (providers.includes('gemini-tts')) {
+    return 'Gemini TTS';
+  }
+  return undefined;
+}
+
+function base64ToBlobUrl(base64: string, mimeType: string): string | null {
+  try {
+    if (typeof window === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+      return null;
+    }
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: mimeType || 'audio/wav' });
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
 }
 
 export function stripMarkdownForSpeech(raw: string): string {
@@ -246,6 +278,7 @@ class SpeechController {
   private activeLocale: 'en-IN' | 'kn-IN' | 'te-IN' | null = null;
   private activeVoiceName: string | null = null;
   private activeSource: 'browser' | 'cloud' | null = null;
+  private activeEngineLabel: string | null = null;
   private activeText: string | null = null;
   private currentRate = 0.9;
   private lastError: SpeechErrorInfo | null = null;
@@ -256,7 +289,10 @@ class SpeechController {
   private activeCallbacks: SpeechCallbacks | undefined = undefined;
   private currentVoice: SpeechSynthesisVoice | null = null;
   private currentAudio: HTMLAudioElement | null = null;
+  private currentObjectUrl: string | null = null;
   private cloudTtsAvailableCache = false;
+  private cloudProvidersCache: Array<'google-cloud-tts' | 'gemini-tts'> = [];
+  private globalCloudConsentGranted = false;
   private audioContext: AudioContext | null = null;
 
   private lastSpokenParams: {
@@ -275,6 +311,15 @@ class SpeechController {
       this.attachVoicesChangedListener();
       void this.refreshCloudCapabilities();
     }
+  }
+
+  public setCloudConsentGranted(granted: boolean): void {
+    this.globalCloudConsentGranted = Boolean(granted);
+    this.voiceListeners.forEach((cb) => cb());
+  }
+
+  public getCloudConsentGranted(): boolean {
+    return this.globalCloudConsentGranted;
   }
 
   private attachVoicesChangedListener(): void {
@@ -297,6 +342,7 @@ class SpeechController {
     try {
       const health = await fetchAiHealthStatus();
       this.cloudTtsAvailableCache = health.ttsConfigured;
+      this.cloudProvidersCache = health.ttsProviders ?? [];
       this.voiceListeners.forEach((cb) => cb());
       return health.ttsConfigured;
     } catch {
@@ -317,6 +363,7 @@ class SpeechController {
       activeLocale: this.activeLocale,
       activeVoiceName: this.activeVoiceName,
       activeSource: this.activeSource,
+      activeEngineLabel: this.activeEngineLabel,
       activeText: this.activeText,
       rate: this.currentRate,
       lastError: this.lastError,
@@ -367,15 +414,18 @@ class SpeechController {
     speechSupported: boolean;
     nativeVoiceAvailable: boolean;
     cloudTtsAvailable: boolean;
+    cloudProviderLabel?: string;
     voiceName?: string;
     locale: 'en-IN' | 'kn-IN' | 'te-IN';
   } {
     const locale = getTtsLocale(lang);
+    const cloudProviderLabel = getCloudProviderDisplayLabel(this.cloudProvidersCache);
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       return {
         speechSupported: false,
         nativeVoiceAvailable: false,
         cloudTtsAvailable: this.cloudTtsAvailableCache,
+        cloudProviderLabel,
         locale,
       };
     }
@@ -386,6 +436,7 @@ class SpeechController {
       speechSupported: true,
       nativeVoiceAvailable: Boolean(match),
       cloudTtsAvailable: this.cloudTtsAvailableCache,
+      cloudProviderLabel,
       voiceName: match?.name,
       locale,
     };
@@ -404,6 +455,7 @@ class SpeechController {
         nativeTtsVoiceAvailable: tts.nativeVoiceAvailable,
         ttsVoiceName: tts.voiceName,
         cloudTtsAvailable: tts.cloudTtsAvailable,
+        cloudProviderLabel: tts.cloudProviderLabel,
         sttApiAvailable,
       };
     }
@@ -557,6 +609,7 @@ class SpeechController {
       this.activeLocale = locale;
       this.activeVoiceName = matchedVoice.name;
       this.activeSource = 'browser';
+      this.activeEngineLabel = `Browser Voice (${matchedVoice.name})`;
       this.activeText = cleanText;
       this.status = 'speaking';
       this.emit();
@@ -643,14 +696,18 @@ class SpeechController {
 
     const hasSpeechSynthesis =
       typeof window !== 'undefined' && 'speechSynthesis' in window;
+    const hasConsent = options.cloudConsentGranted ?? this.globalCloudConsentGranted;
 
-    if (cloudConfigured && options.cloudConsentGranted) {
+    if (cloudConfigured && hasConsent) {
+      const pendingLabel =
+        getCloudProviderDisplayLabel(this.cloudProvidersCache) || 'Gemini TTS';
       this.status = 'loading';
       this.activeId = options.itemId ?? null;
       this.activeLang = lang;
       this.activeLocale = locale;
       this.activeSource = 'cloud';
-      this.activeVoiceName = 'Cloud TTS';
+      this.activeVoiceName = pendingLabel;
+      this.activeEngineLabel = pendingLabel;
       this.activeText = cleanText;
       this.emit();
 
@@ -663,15 +720,34 @@ class SpeechController {
         });
         if (token !== this.activeSessionToken) return;
 
-        const audio = new Audio(`data:${res.mimeType};base64,${res.audioBase64}`);
+        const mime = res.mimeType || 'audio/wav';
+        const objectUrl = base64ToBlobUrl(res.audioBase64, mime);
+        const audioSrc = objectUrl || `data:${mime};base64,${res.audioBase64}`;
+        if (objectUrl) {
+          this.currentObjectUrl = objectUrl;
+        }
+
+        const audio = new Audio(audioSrc);
+        audio.preload = 'auto';
         audio.playbackRate = this.currentRate;
         this.currentAudio = audio;
         this.activeCallbacks = callbacks;
-        this.activeVoiceName =
-          res.provider === 'google-cloud-tts' ? `Cloud Voice (${res.locale})` : `Gemini TTS (${res.locale})`;
+
+        const engineLabel =
+          res.provider === 'google-cloud-tts'
+            ? `Google Cloud TTS (${res.locale})`
+            : `Gemini TTS (${res.model || 'gemini-3.8-flash-lite-tts'})`;
+        this.activeVoiceName = engineLabel;
+        this.activeEngineLabel = engineLabel;
+
+        audio.onloadedmetadata = () => {
+          if (token !== this.activeSessionToken) return;
+          audio.playbackRate = this.currentRate;
+        };
 
         audio.onplay = () => {
           if (token !== this.activeSessionToken) return;
+          audio.playbackRate = this.currentRate;
           this.status = 'speaking';
           this.emit();
           callbacks?.onStart?.();
@@ -690,7 +766,7 @@ class SpeechController {
             code: 'cloud-unavailable',
             language: lang,
             locale,
-            message: formatUnavailableVoiceMessage(lang, false),
+            message: `Audio playback failed for ${getAudioLanguageBadge(lang)}. Please tap Replay or verify browser audio output.`,
           };
           this.lastError = errInfo;
           this.resetState(true);
@@ -702,10 +778,13 @@ class SpeechController {
         return;
       } catch (err) {
         if (token !== this.activeSessionToken) return;
-        const message =
-          err instanceof AiClientError
-            ? err.message
-            : formatUnavailableVoiceMessage(lang, false);
+        const isAutoplayBlocked =
+          err instanceof DOMException && err.name === 'NotAllowedError';
+        const message = isAutoplayBlocked
+          ? `Your browser paused automatic playback for ${getAudioLanguageBadge(lang)}. Tap Listen or Play to start the audio.`
+          : err instanceof AiClientError
+          ? formatAiErrorMessage(err, lang)
+          : formatUnavailableVoiceMessage(lang, false);
         const errInfo: SpeechErrorInfo = {
           code: 'cloud-unavailable',
           language: lang,
@@ -721,7 +800,7 @@ class SpeechController {
     }
 
     // Either Cloud TTS is not configured, OR Cloud TTS needs user consent, OR Web Speech lacks a voice for kn/te
-    const needsConsent = cloudConfigured && !options.cloudConsentGranted;
+    const needsConsent = cloudConfigured && !hasConsent;
     const errCode: SpeechErrorCode = !hasSpeechSynthesis
       ? 'unsupported'
       : needsConsent
@@ -815,6 +894,17 @@ class SpeechController {
     this.stopInternal(true);
   }
 
+  private revokeCurrentObjectUrl(): void {
+    if (this.currentObjectUrl) {
+      try {
+        URL.revokeObjectURL(this.currentObjectUrl);
+      } catch {
+        // ignore cleanup error
+      }
+      this.currentObjectUrl = null;
+    }
+  }
+
   private stopInternal(clearErrorToo: boolean): void {
     this.activeSessionToken += 1;
     if (this.currentAudio) {
@@ -826,6 +916,7 @@ class SpeechController {
       }
       this.currentAudio = null;
     }
+    this.revokeCurrentObjectUrl();
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -836,12 +927,14 @@ class SpeechController {
   }
 
   private resetState(emitSnapshot: boolean): void {
+    this.revokeCurrentObjectUrl();
     this.status = 'idle';
     this.activeId = null;
     this.activeLang = null;
     this.activeLocale = null;
     this.activeVoiceName = null;
     this.activeSource = null;
+    this.activeEngineLabel = null;
     this.activeText = null;
     this.activeChunks = [];
     this.activeChunkIndex = 0;

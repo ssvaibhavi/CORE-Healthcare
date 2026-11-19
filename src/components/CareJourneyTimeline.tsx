@@ -143,7 +143,7 @@ export const CareJourneyTimeline: React.FC<CareJourneyTimelineProps> = ({
         </div>
 
         {/* Progress Indicator */}
-        <div className="bg-[#FCF9F5] border border-[#BEA06D]/30 rounded-2xl p-4 min-w-[220px] space-y-2">
+        <div className="bg-[#FCF9F5] border border-[#BEA06D]/30 rounded-2xl p-4 w-full sm:w-auto sm:min-w-[220px] space-y-2">
           <div className="flex items-center justify-between text-xs font-bold">
             <span className="text-[#8F7242]">
               {language === 'kn' ? 'ಸಿದ್ಧತೆ ಪ್ರಗತಿ' : language === 'te' ? 'తయారీ పురోగతి' : 'Preparation Progress'}

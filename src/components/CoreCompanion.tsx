@@ -2542,14 +2542,14 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
 
               {/* Compact Bottom Composer, Voice Playback/Listening Bar & Collapsible Suggestions */}
               <div className="shrink-0 bg-white border-t border-[#BEA06D]/25">
-                {/* Active TTS Playback Bar (Language badge + Pause / Resume / Replay / Stop / Speed) */}
+                {/* Active TTS Playback Bar (Language badge + Engine badge + Pause / Resume / Replay / Stop / Speed) */}
                 {playbackSnap.status !== 'idle' && (
                   <div className="px-3.5 sm:px-5 py-2 bg-[#FCF9F5] border-b border-[#BEA06D]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 text-[#493C39] font-semibold">
+                    <div className="flex flex-wrap items-center gap-2 text-[#493C39] font-semibold min-w-0">
                       {playbackSnap.status === 'loading' ? (
                         <Loader2 className="w-3.5 h-3.5 text-[#C88F98] animate-spin shrink-0" />
                       ) : (
-                        <div className="flex items-center gap-0.5 h-4" aria-hidden="true">
+                        <div className="flex items-center gap-0.5 h-4 shrink-0" aria-hidden="true">
                           {[1, 2, 3, 4].map((b) => (
                             <span
                               key={b}
@@ -2562,13 +2562,18 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                           ))}
                         </div>
                       )}
-                      <span>
+                      <span className="break-words">
                         {playbackSnap.status === 'loading'
                           ? `Preparing ${getAudioLanguageBadge(playbackSnap.activeLang || chatLanguage)}`
                           : playbackSnap.status === 'paused'
                           ? `Paused (${getAudioLanguageBadge(playbackSnap.activeLang || chatLanguage)})`
                           : `Speaking: ${getAudioLanguageBadge(playbackSnap.activeLang || chatLanguage)}`}
                       </span>
+                      {playbackSnap.activeEngineLabel && (
+                        <span className="px-2 py-0.5 rounded-full bg-white border border-[#BEA06D]/35 text-[10px] font-semibold text-[#8A6D3F] truncate max-w-[220px]">
+                          {playbackSnap.activeEngineLabel}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -2662,23 +2667,40 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                   </div>
                 )}
 
-                {/* Voice Error / Missing OS Voice Pack Notice */}
+                {/* Voice Error / Cloud Consent Notice */}
                 {voiceStatusMessage && (
-                  <div className="px-3.5 sm:px-5 py-2.5 bg-[#E6C1C4]/18 border-b border-[#C88F98]/50 flex items-start justify-between gap-2.5 text-xs text-[#493C39]">
-                    <div className="flex items-start gap-2">
+                  <div className="px-3.5 sm:px-5 py-2.5 bg-[#E6C1C4]/18 border-b border-[#C88F98]/50 flex flex-wrap items-start justify-between gap-2.5 text-xs text-[#493C39]">
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
                       <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
-                      <span className="leading-relaxed">{voiceStatusMessage}</span>
+                      <span className="leading-relaxed break-words">{voiceStatusMessage}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVoiceStatusMessage(null);
-                        speechService.clearError();
-                      }}
-                      className="text-[#8A6D3F] font-semibold underline shrink-0 cursor-pointer"
-                    >
-                      Dismiss
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!aiConsentGranted && playbackSnap.lastError?.code === 'cloud-consent-required' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onAcceptAiConsent();
+                            speechService.setCloudConsentGranted(true);
+                            setVoiceStatusMessage(null);
+                            speechService.clearError();
+                            speechService.replay();
+                          }}
+                          className="compact-chip px-2.5 py-1 rounded-full bg-[#4A6347] hover:bg-[#3b5038] text-white font-semibold cursor-pointer"
+                        >
+                          Enable Gemini Voice
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceStatusMessage(null);
+                          speechService.clearError();
+                        }}
+                        className="text-[#8A6D3F] font-semibold underline shrink-0 cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
                   </div>
                 )}
 

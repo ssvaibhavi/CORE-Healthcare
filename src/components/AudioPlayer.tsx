@@ -13,6 +13,7 @@ interface AudioPlayerProps {
   language: Language;
   title?: string;
   cloudConsentGranted?: boolean;
+  onAcceptAiConsent?: () => void;
   onFinished?: () => void;
 }
 
@@ -27,6 +28,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   textToSpeak,
   language,
   cloudConsentGranted = false,
+  onAcceptAiConsent,
   onFinished,
 }) => {
   const [currentSentence, setCurrentSentence] = useState<string>('');
@@ -127,27 +129,28 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const activeError =
     playback.lastError && playback.lastError.language === language ? playback.lastError : null;
 
+  const activeEngineText = isThisActive && playback.activeEngineLabel
+    ? playback.activeEngineLabel
+    : voiceInfo.nativeVoiceAvailable
+    ? `Browser Voice${voiceInfo.voiceName ? ` · ${voiceInfo.voiceName}` : ''}`
+    : voiceInfo.cloudTtsAvailable
+    ? `${voiceInfo.cloudProviderLabel || 'Gemini TTS'} · ${cloudConsentGranted ? 'Ready' : 'One-Tap Enable'}`
+    : 'Voice Unavailable';
+
   return (
     <div className="bg-gradient-to-r from-[#FCF9F5] via-[#FFFFFF] to-[#FCF9F5] border-2 border-[#BEA06D]/60 rounded-3xl p-5 sm:p-7 shadow-md transition-all">
-      {/* Top Language & Voice Indicator Strip */}
+      {/* Top Language & Speech Engine Indicator Strip */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-[#BEA06D]/20 text-xs">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <span className="font-bold text-[#8F7242] uppercase tracking-wider">
             {language === 'kn' ? 'ಆಡಿಯೋ ಭಾಷೆ:' : language === 'te' ? 'ఆడియో భాష:' : 'Audio Language:'}
           </span>
           <span className="px-3 py-1 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/45 font-semibold text-[#3C3330]">
             {getAudioLanguageBadge(language)}
           </span>
-          {voiceInfo.nativeVoiceAvailable && voiceInfo.voiceName && (
-            <span className="text-[11px] font-medium text-[#4A6347]">
-              · {voiceInfo.voiceName}
-            </span>
-          )}
-          {!voiceInfo.nativeVoiceAvailable && voiceInfo.cloudTtsAvailable && (
-            <span className="text-[11px] font-medium text-[#4A6347]">
-              · {cloudConsentGranted ? 'Cloud Speech Ready' : 'Cloud Speech Available'}
-            </span>
-          )}
+          <span className="px-2.5 py-1 rounded-full bg-[#A2B29B]/15 border border-[#A2B29B]/40 text-[11px] font-semibold text-[#4A6347] break-words">
+            {activeEngineText}
+          </span>
         </div>
 
         {/* Speed Selector Pills (0.75x / 0.9x / 1.0x) */}
@@ -309,24 +312,93 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </div>
       )}
 
-      {/* Explicit Error Notice if user clicked Listen when requested language voice is missing */}
+      {/* Explicit Error Notice if playback fails or needs Gemini TTS consent */}
       {activeError && (
-        <div className="mt-4 p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#C98897] text-xs sm:text-sm text-[#3C3330] flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2.5">
+        <div className="mt-4 p-3.5 rounded-2xl bg-[#E6C1C4]/25 border border-[#C98897] text-xs sm:text-sm text-[#3C3330] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 flex-1 min-w-[200px]">
             <AlertCircle className="w-4 h-4 text-[#C98897] shrink-0 mt-0.5" />
             <span>{activeError.message}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => speechService.clearError()}
-            className="text-xs font-semibold text-[#8F7242] underline shrink-0 cursor-pointer"
-          >
-            {language === 'kn' ? 'ಮುಚ್ಚಿ' : language === 'te' ? 'మూసివేయండి' : 'Dismiss'}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {activeError.code === 'cloud-consent-required' && onAcceptAiConsent && (
+              <button
+                type="button"
+                onClick={() => {
+                  onAcceptAiConsent();
+                  speechService.setCloudConsentGranted(true);
+                  speechService.clearError();
+                  speechService.speak(
+                    textToSpeak,
+                    language,
+                    {
+                      onSentence: (_idx, sentence) => setCurrentSentence(sentence),
+                      onEnd: () => {
+                        setCurrentSentence('');
+                        onFinished?.();
+                      },
+                    },
+                    {
+                      rate: speechRate,
+                      itemId: PLAYER_ID,
+                      cloudConsentGranted: true,
+                    }
+                  );
+                }}
+                className="px-3.5 py-1.5 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-semibold cursor-pointer"
+              >
+                {language === 'kn'
+                  ? 'Gemini ಧ್ವನಿ ಸಕ್ರಿಯಗೊಳಿಸಿ'
+                  : language === 'te'
+                  ? 'Gemini వాయిస్ ఆన్ చేయండి'
+                  : 'Enable Gemini Voice'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => speechService.clearError()}
+              className="text-xs font-semibold text-[#8F7242] underline shrink-0 cursor-pointer"
+            >
+              {language === 'kn' ? 'ಮುಚ್ಚಿ' : language === 'te' ? 'మూసివేయండి' : 'Dismiss'}
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Proactive Transparent Voice Support Notice */}
+      {/* Gentle Consent Prompt when browser lacks voice pack and Gemini TTS is ready on server */}
+      {!activeError &&
+        !voiceInfo.nativeVoiceAvailable &&
+        voiceInfo.cloudTtsAvailable &&
+        !cloudConsentGranted &&
+        onAcceptAiConsent && (
+          <div className="mt-4 p-3.5 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/45 text-xs text-[#493C39] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-2 flex-1 min-w-[200px]">
+              <Info className="w-4 h-4 text-[#8A6D3F] shrink-0 mt-0.5" />
+              <span>
+                {language === 'kn'
+                  ? `ನಿಮ್ಮ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಕನ್ನಡ ಧ್ವನಿ ಇಲ್ಲದಿರುವುದರಿಂದ CORE ಸುರಕ್ಷಿತ ${voiceInfo.cloudProviderLabel || 'Gemini TTS'} ಮೂಲಕ ಸ್ವಾಭಾವಿಕ ಕನ್ನಡ ಧ್ವನಿಯನ್ನು ಒದಗಿಸುತ್ತದೆ.`
+                  : language === 'te'
+                  ? `మీ బ్రౌజర్‌లో తెలుగు వాయిస్ లేకపోతే, CORE సురక్షిత ${voiceInfo.cloudProviderLabel || 'Gemini TTS'} ద్వారా సహజమైన తెలుగు వాయిస్‌ను అందిస్తుంది.`
+                  : `Browser voice pack not installed for ${getAudioLanguageBadge(language)}. CORE can generate clear audio securely using ${voiceInfo.cloudProviderLabel || 'Gemini TTS'}.`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onAcceptAiConsent();
+                speechService.setCloudConsentGranted(true);
+              }}
+              className="px-3.5 py-1.5 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs font-semibold cursor-pointer shrink-0"
+            >
+              {language === 'kn'
+                ? 'Gemini ಧ್ವನಿ ಅನುಮತಿಸಿ'
+                : language === 'te'
+                ? 'Gemini వాయిస్ అనుమతించండి'
+                : 'Enable Gemini Voice'}
+            </button>
+          </div>
+        )}
+
+      {/* Only show unavailable-voice warning when NEITHER native browser voice NOR server TTS is available */}
       {!activeError && (!voiceInfo.speechSupported || !voiceInfo.nativeVoiceAvailable) && !voiceInfo.cloudTtsAvailable && (
         <div className="mt-4 p-3 rounded-2xl bg-[#FCF9F5] border border-[#BEA06D]/35 text-xs text-[#493C39]/85 flex items-start gap-2">
           <Info className="w-4 h-4 text-[#8A6D3F] shrink-0 mt-0.5" />

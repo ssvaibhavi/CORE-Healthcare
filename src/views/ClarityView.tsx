@@ -426,24 +426,37 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                       )
                     )}
                   </span>
+                  {playbackSnap.activeId === 'clarity-ai-result' && playbackSnap.activeEngineLabel && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/30 font-semibold text-[#8A6D3F]">
+                      {playbackSnap.activeEngineLabel}
+                    </span>
+                  )}
+                  {playbackSnap.activeId === 'clarity-ai-result' && playbackSnap.status === 'loading' && (
+                    <span className="inline-flex items-center gap-1 font-semibold text-[#8A6D3F]">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#C88F98]" />
+                      <span>Preparing voice...</span>
+                    </span>
+                  )}
                   {playbackSnap.activeId === 'clarity-ai-result' && playbackSnap.status !== 'idle' && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          playbackSnap.status === 'paused'
-                            ? speechService.resume()
-                            : speechService.pause()
-                        }
-                        className="compact-chip px-2.5 py-1 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/40 font-semibold text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        {playbackSnap.status === 'paused' ? (
-                          <Play className="w-3 h-3" />
-                        ) : (
-                          <Pause className="w-3 h-3" />
-                        )}
-                        <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
-                      </button>
+                      {playbackSnap.status !== 'loading' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            playbackSnap.status === 'paused'
+                              ? speechService.resume()
+                              : speechService.pause()
+                          }
+                          className="compact-chip px-2.5 py-1 rounded-lg bg-[#FCF9F5] border border-[#BEA06D]/40 font-semibold text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          {playbackSnap.status === 'paused' ? (
+                            <Play className="w-3 h-3" />
+                          ) : (
+                            <Pause className="w-3 h-3" />
+                          )}
+                          <span>{playbackSnap.status === 'paused' ? 'Resume' : 'Pause'}</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => speechService.replay()}
@@ -482,21 +495,38 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
               </div>
 
               {audioNotice && (
-                <div className="p-3 rounded-xl bg-[#E6C1C4]/22 border border-[#C88F98] text-xs text-[#493C39] flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2">
+                <div className="p-3 rounded-xl bg-[#E6C1C4]/22 border border-[#C88F98] text-xs text-[#493C39] flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex items-start gap-2 flex-1 min-w-0">
                     <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
-                    <span>{audioNotice}</span>
+                    <span className="break-words">{audioNotice}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAudioNotice(null);
-                      speechService.clearError();
-                    }}
-                    className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!aiConsentGranted && playbackSnap.lastError?.code === 'cloud-consent-required' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onAcceptAiConsent();
+                          speechService.setCloudConsentGranted(true);
+                          setAudioNotice(null);
+                          speechService.clearError();
+                          speechService.replay();
+                        }}
+                        className="compact-chip px-2.5 py-1 rounded-full bg-[#4A6347] hover:bg-[#3b5038] text-white font-semibold cursor-pointer"
+                      >
+                        Enable Gemini Voice
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAudioNotice(null);
+                        speechService.clearError();
+                      }}
+                      className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -708,9 +738,31 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                       {level === 'simple' ? 'Simple Explanation' : 'Extra Simple Explanation'}
                     </span>
                   </span>
-                  <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-white border border-[#BEA06D]/35 text-[#493C39]">
-                    {getAudioLanguageBadge(resolveSpeechLanguage(activeText, currentLanguage))}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-white border border-[#BEA06D]/35 text-[#493C39]">
+                      {getAudioLanguageBadge(resolveSpeechLanguage(activeText, currentLanguage))}
+                    </span>
+                    {(() => {
+                      const refItemId = `clarity-ref-${selectedItem.id}-${level}`;
+                      const refLang = resolveSpeechLanguage(activeText, currentLanguage);
+                      const refSupport = speechService.getAllLanguagesVoiceSupport()[refLang];
+                      const isRefActive =
+                        playbackSnap.activeId === refItemId && playbackSnap.status !== 'idle';
+                      const engineLabel =
+                        isRefActive && playbackSnap.activeEngineLabel
+                          ? playbackSnap.activeEngineLabel
+                          : refSupport.nativeTtsVoiceAvailable
+                          ? `Browser Voice${refSupport.ttsVoiceName ? ` · ${refSupport.ttsVoiceName}` : ''}`
+                          : refSupport.cloudTtsAvailable
+                          ? `${refSupport.cloudProviderLabel || 'Gemini TTS'} Ready`
+                          : null;
+                      return engineLabel ? (
+                        <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-white border border-[#BEA06D]/25 text-[#8A6D3F] max-w-[240px] truncate">
+                          {engineLabel}
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
 
                 <p className="font-display text-2xl sm:text-3xl font-bold text-[#322826] leading-snug">
@@ -721,6 +773,7 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                   const refItemId = `clarity-ref-${selectedItem.id}-${level}`;
                   const isRefActive =
                     playbackSnap.activeId === refItemId && playbackSnap.status !== 'idle';
+                  const isRefLoading = isRefActive && playbackSnap.status === 'loading';
                   const isRefPaused = isRefActive && playbackSnap.status === 'paused';
 
                   return (
@@ -736,13 +789,17 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                                 : 'bg-[#BEA06D] hover:bg-[#8A6D3F] text-white'
                             }`}
                           >
-                            {isRefActive ? (
+                            {isRefLoading ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : isRefActive ? (
                               <VolumeX className="w-4 h-4" />
                             ) : (
                               <Volume2 className="w-4 h-4" />
                             )}
                             <span>
-                              {isRefActive
+                              {isRefLoading
+                                ? 'Preparing Audio...'
+                                : isRefActive
                                 ? currentLanguage === 'kn'
                                   ? 'ಧ್ವನಿ ನಿಲ್ಲಿಸಿ'
                                   : currentLanguage === 'te'
@@ -758,20 +815,22 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
 
                           {isRefActive && (
                             <>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  isRefPaused ? speechService.resume() : speechService.pause()
-                                }
-                                className="compact-chip py-2 px-3.5 rounded-full bg-white border border-[#BEA06D]/45 text-xs font-bold text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
-                              >
-                                {isRefPaused ? (
-                                  <Play className="w-3.5 h-3.5" />
-                                ) : (
-                                  <Pause className="w-3.5 h-3.5" />
-                                )}
-                                <span>{isRefPaused ? 'Resume' : 'Pause'}</span>
-                              </button>
+                              {!isRefLoading && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    isRefPaused ? speechService.resume() : speechService.pause()
+                                  }
+                                  className="compact-chip py-2 px-3.5 rounded-full bg-white border border-[#BEA06D]/45 text-xs font-bold text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  {isRefPaused ? (
+                                    <Play className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Pause className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>{isRefPaused ? 'Resume' : 'Pause'}</span>
+                                </button>
+                              )}
 
                               <button
                                 type="button"
@@ -805,21 +864,38 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                       </div>
 
                       {audioNotice && (
-                        <div className="p-3 rounded-xl bg-white border border-[#C88F98] text-xs text-[#493C39] flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2">
+                        <div className="p-3 rounded-xl bg-white border border-[#C88F98] text-xs text-[#493C39] flex flex-wrap items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 flex-1 min-w-0">
                             <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
-                            <span>{audioNotice}</span>
+                            <span className="break-words">{audioNotice}</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAudioNotice(null);
-                              speechService.clearError();
-                            }}
-                            className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
-                          >
-                            Dismiss
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!aiConsentGranted && playbackSnap.lastError?.code === 'cloud-consent-required' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onAcceptAiConsent();
+                                  speechService.setCloudConsentGranted(true);
+                                  setAudioNotice(null);
+                                  speechService.clearError();
+                                  speechService.replay();
+                                }}
+                                className="compact-chip px-2.5 py-1 rounded-full bg-[#4A6347] hover:bg-[#3b5038] text-white font-semibold cursor-pointer"
+                              >
+                                Enable Gemini Voice
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAudioNotice(null);
+                                speechService.clearError();
+                              }}
+                              className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>

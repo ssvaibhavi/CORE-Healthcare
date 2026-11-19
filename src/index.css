@@ -15,6 +15,12 @@
     --surface-white: #FFFFFF;
   }
 
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
   body {
     background-color: var(--bg-ivory);
     color: var(--espresso-dark);
@@ -44,10 +50,12 @@
 
 .font-kannada {
   font-family: 'Noto Sans Kannada', 'Plus Jakarta Sans', sans-serif;
+  overflow-wrap: break-word;
 }
 
 .font-telugu {
   font-family: 'Noto Sans Telugu', 'Plus Jakarta Sans', sans-serif;
+  overflow-wrap: break-word;
 }
 
 /* Rosewater Editorial Hairlines & Ornamental Frames */
