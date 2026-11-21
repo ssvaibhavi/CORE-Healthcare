@@ -85,7 +85,8 @@ export default async function handler(req: Request): Promise<Response> {
     }
     return jsonResponse({ error: 'NOT_FOUND', message: 'Unknown AI endpoint.' }, 404);
   } catch (err) {
-    const mapped = mapGeminiError(err);
+    const operation = pathname === '/ai/tts' ? 'tts' : undefined;
+    const mapped = mapGeminiError(err, { operation });
     return jsonResponse({ error: mapped.code, message: mapped.message }, mapped.status);
   }
 }

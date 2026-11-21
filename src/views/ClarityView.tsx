@@ -12,6 +12,7 @@ import {
   SpeechPlaybackSnapshot,
   SpeechRate,
 } from '../utils/speech';
+import { AudioProgressBar } from '../components/AudioProgressBar';
 import {
   ArrowLeft,
   Volume2,
@@ -492,6 +493,17 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                     </button>
                   ))}
                 </div>
+
+                {playbackSnap.activeId === 'clarity-ai-result' &&
+                  (playbackSnap.status === 'speaking' || playbackSnap.status === 'paused') && (
+                    <div className="w-full basis-full">
+                      <AudioProgressBar
+                        snapshot={playbackSnap}
+                        language={playbackSnap.activeLang || currentLanguage}
+                        compact
+                      />
+                    </div>
+                  )}
               </div>
 
               {audioNotice && (
@@ -862,6 +874,15 @@ export const ClarityView: React.FC<ClarityViewProps> = ({
                           ))}
                         </div>
                       </div>
+
+                      {isRefActive &&
+                        (playbackSnap.status === 'speaking' || playbackSnap.status === 'paused') && (
+                          <AudioProgressBar
+                            snapshot={playbackSnap}
+                            language={playbackSnap.activeLang || currentLanguage}
+                            compact
+                          />
+                        )}
 
                       {audioNotice && (
                         <div className="p-3 rounded-xl bg-white border border-[#C88F98] text-xs text-[#493C39] flex flex-wrap items-start justify-between gap-2">

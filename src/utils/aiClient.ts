@@ -126,14 +126,53 @@ export function formatAiErrorMessage(err: unknown, language: Language): string {
     return 'Google Gemini API quota is currently exhausted. Please try again later or check your API plan.';
   }
 
-  if (code === 'RATE_LIMITED') {
+  if (code === 'AI_RATE_LIMITED' || code === 'RATE_LIMITED' || code === 'TTS_RATE_LIMITED') {
     if (language === 'kn') {
       return 'CORE AI ತಾತ್ಕಾಲಿಕ ವಿನಂತಿ ಮಿತಿಯನ್ನು ತಲುಪಿದೆ. ದಯವಿಟ್ಟು ಕೆಲವು ಸೆಕೆಂಡುಗಳು ಕಾದು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
     }
     if (language === 'te') {
       return 'CORE AI తాత్కాలిక అభ్యర్థన పరిమితికి చేరుకుంది. దయచేసి కొన్ని సెకన్లు వేచి ఉండి మళ్ళీ ప్రయత్నించండి.';
     }
+    if (err instanceof AiClientError && err.message) {
+      return err.message;
+    }
     return 'CORE AI reached a temporary request limit. Please wait a few seconds and tap Retry.';
+  }
+
+  if (code === 'AI_KEY_INVALID' || code === 'AI_PERMISSION_DENIED' || code === 'GEMINI_NOT_CONFIGURED') {
+    if (language === 'kn') {
+      return 'ಸರ್ವರ್ AI ದೃಢೀಕರಣ (Authentication) ದೋಷವಾಗಿದೆ. ದಯವಿಟ್ಟು ಸರ್ವರ್ ಪರಿಸರದ API ಕೀ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ಪರಿಶೀಲಿಸಿ.';
+    }
+    if (language === 'te') {
+      return 'సర్వర్ AI ప్రమాణీకరణ (Authentication) లోపం ఏర్పడింది. దయచేసి సర్వర్ API కీ సెట్టింగ్‌లను తనిఖీ చేయండి.';
+    }
+    return err instanceof AiClientError && err.message
+      ? err.message
+      : 'Server AI authentication failed. Please check the configured API credentials.';
+  }
+
+  if (code === 'AI_MODEL_UNAVAILABLE') {
+    if (language === 'kn') {
+      return 'ಸಂರಚಿಸಲಾದ Gemini ಧ್ವನಿ/AI ಮಾದರಿ ಲಭ್ಯವಿಲ್ಲ ಅಥವಾ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ. ದಯವಿಟ್ಟು ಪಠ್ಯ ವಿವರಣೆಯನ್ನು ಓದಿ ಅಥವಾ ಆಡಳಿತಗಾರರನ್ನು ಸಂಪರ್ಕಿಸಿ.';
+    }
+    if (language === 'te') {
+      return 'కాన్ఫిగర్ చేసిన Gemini వాయిస్/AI మోడల్ అందుబాటులో లేదు లేదా మద్దతు లేదు. దయచేసి పై టెక్స్ట్‌ను చదవండి.';
+    }
+    return err instanceof AiClientError && err.message
+      ? err.message
+      : 'The configured Gemini model or audio format is unsupported or unavailable.';
+  }
+
+  if (code === 'TTS_INVALID_REQUEST' || code === 'TTS_EMPTY_AUDIO') {
+    if (language === 'kn') {
+      return 'ಧ್ವನಿ ಉತ್ಪಾದನೆ (TTS) ವಿನಂತಿಯನ್ನು ಪೂರ್ಣಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ ಮೇಲಿನ ಕನ್ನಡ ಪಠ್ಯವನ್ನು ಓದಿ.';
+    }
+    if (language === 'te') {
+      return 'వాయిస్ తయారీ (TTS) అభ్యర్థనను పూర్తి చేయలేకపోయాము. దయచేసి మళ్ళీ ప్రయత్నించండి లేదా పై తెలుగు టెక్స్ట్ చదవండి.';
+    }
+    return err instanceof AiClientError && err.message
+      ? err.message
+      : 'Speech synthesis could not process this audio request. Please try again or read the text above.';
   }
 
   if (err instanceof AiClientError && err.message) {

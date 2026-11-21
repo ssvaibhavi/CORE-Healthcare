@@ -17,6 +17,7 @@ import {
   SpeechPlaybackSnapshot,
   SpeechRate,
 } from '../utils/speech';
+import { AudioProgressBar } from '../components/AudioProgressBar';
 import {
   ArrowLeft,
   ArrowRight,
@@ -761,6 +762,15 @@ export const VoiceBridgeView: React.FC<VoiceBridgeViewProps> = ({
               </span>
             </button>
           </div>
+
+          {(visualState === 'speaking' || visualState === 'paused') && (
+            <div className="w-full basis-full">
+              <AudioProgressBar
+                snapshot={playbackSnap}
+                language={playbackSnap.activeLang || currentLanguage}
+              />
+            </div>
+          )}
         </div>
 
         {/* Settings Strip: Explanation Length + Auto-Speak */}

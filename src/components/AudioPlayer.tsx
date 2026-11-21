@@ -7,6 +7,7 @@ import {
   SpeechPlaybackSnapshot,
   SpeechRate,
 } from '../utils/speech';
+import { AudioProgressBar } from './AudioProgressBar';
 
 interface AudioPlayerProps {
   textToSpeak: string;
@@ -289,6 +290,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           )}
         </div>
       </div>
+
+      {/* Playback Progress Indicator (audio elapsed time or sentence part progress) */}
+      {isThisActive && !isLoading && (
+        <div className="mt-3 pt-2 border-t border-[#BEA06D]/15">
+          <AudioProgressBar snapshot={playback} language={language} />
+        </div>
+      )}
 
       {/* Visual Readout Box when speaking */}
       {currentSentence && (

@@ -42,7 +42,23 @@ export interface SpeechPlaybackSnapshot {
   activeEngineLabel: string | null;
   activeText: string | null;
   rate: number;
+  progressPercent: number;
+  currentTimeSec: number | null;
+  durationSec: number | null;
+  currentChunk: number | null;
+  totalChunks: number | null;
+  progressMode: 'time' | 'chunks' | null;
   lastError: SpeechErrorInfo | null;
+}
+
+export function formatAudioTime(seconds: number | null | undefined): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+    return '0:00';
+  }
+  const total = Math.floor(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export interface LanguageVoiceSupport {
@@ -281,6 +297,13 @@ class SpeechController {
   private activeEngineLabel: string | null = null;
   private activeText: string | null = null;
   private currentRate = 0.9;
+  private progressPercent = 0;
+  private currentTimeSec: number | null = null;
+  private durationSec: number | null = null;
+  private currentChunk: number | null = null;
+  private totalChunks: number | null = null;
+  private progressMode: 'time' | 'chunks' | null = null;
+  private lastProgressEmitAt = 0;
   private lastError: SpeechErrorInfo | null = null;
 
   private activeSessionToken = 0;
@@ -366,6 +389,12 @@ class SpeechController {
       activeEngineLabel: this.activeEngineLabel,
       activeText: this.activeText,
       rate: this.currentRate,
+      progressPercent: this.progressPercent,
+      currentTimeSec: this.currentTimeSec,
+      durationSec: this.durationSec,
+      currentChunk: this.currentChunk,
+      totalChunks: this.totalChunks,
+      progressMode: this.progressMode,
       lastError: this.lastError,
     };
   }
@@ -635,6 +664,13 @@ class SpeechController {
 
     const chunk = this.activeChunks[index];
     this.activeChunkIndex = index;
+    const total = this.activeChunks.length;
+    this.progressMode = 'chunks';
+    this.currentChunk = index + 1;
+    this.totalChunks = total;
+    this.progressPercent = total > 0 ? Math.round(((index + 1) / total) * 100) : 0;
+    this.currentTimeSec = null;
+    this.durationSec = null;
 
     const utterance = new SpeechSynthesisUtterance(chunk);
     if (this.currentVoice) {
@@ -730,8 +766,18 @@ class SpeechController {
         const audio = new Audio(audioSrc);
         audio.preload = 'auto';
         audio.playbackRate = this.currentRate;
+        // Preserve natural voice pitch when patient picks 0.75x or 0.9x speed
+        if ('preservesPitch' in audio) {
+          audio.preservesPitch = true;
+        }
         this.currentAudio = audio;
         this.activeCallbacks = callbacks;
+        this.progressMode = 'time';
+        this.progressPercent = 0;
+        this.currentTimeSec = 0;
+        this.durationSec = null;
+        this.currentChunk = null;
+        this.totalChunks = null;
 
         const engineLabel =
           res.provider === 'google-cloud-tts'
@@ -743,11 +789,40 @@ class SpeechController {
         audio.onloadedmetadata = () => {
           if (token !== this.activeSessionToken) return;
           audio.playbackRate = this.currentRate;
+          if ('preservesPitch' in audio) {
+            audio.preservesPitch = true;
+          }
+          if (Number.isFinite(audio.duration) && audio.duration > 0) {
+            this.durationSec = audio.duration;
+          }
+          this.emit();
+        };
+
+        audio.ontimeupdate = () => {
+          if (token !== this.activeSessionToken) return;
+          const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null;
+          const cur = Number.isFinite(audio.currentTime) ? Math.max(0, audio.currentTime) : 0;
+          const nextPct = dur ? Math.min(100, Math.max(0, Math.round((cur / dur) * 100))) : 0;
+          const now = Date.now();
+          const changed = nextPct !== this.progressPercent || Math.floor(cur) !== Math.floor(this.currentTimeSec ?? -1);
+          this.currentTimeSec = cur;
+          this.durationSec = dur;
+          this.progressPercent = nextPct;
+          if (changed && now - this.lastProgressEmitAt >= 150) {
+            this.lastProgressEmitAt = now;
+            this.emit();
+          }
         };
 
         audio.onplay = () => {
           if (token !== this.activeSessionToken) return;
           audio.playbackRate = this.currentRate;
+          if ('preservesPitch' in audio) {
+            audio.preservesPitch = true;
+          }
+          if (Number.isFinite(audio.duration) && audio.duration > 0) {
+            this.durationSec = audio.duration;
+          }
           this.status = 'speaking';
           this.emit();
           callbacks?.onStart?.();
@@ -890,6 +965,19 @@ class SpeechController {
     }
   }
 
+  public seekToPercent(percent: number): void {
+    if (!this.currentAudio || !Number.isFinite(this.currentAudio.duration) || this.currentAudio.duration <= 0) {
+      return;
+    }
+    const clampedPct = Math.min(100, Math.max(0, percent));
+    const targetSec = (clampedPct / 100) * this.currentAudio.duration;
+    this.currentAudio.currentTime = targetSec;
+    this.currentTimeSec = targetSec;
+    this.durationSec = this.currentAudio.duration;
+    this.progressPercent = Math.round(clampedPct);
+    this.emit();
+  }
+
   public stop(): void {
     this.stopInternal(true);
   }
@@ -936,6 +1024,13 @@ class SpeechController {
     this.activeSource = null;
     this.activeEngineLabel = null;
     this.activeText = null;
+    this.progressPercent = 0;
+    this.currentTimeSec = null;
+    this.durationSec = null;
+    this.currentChunk = null;
+    this.totalChunks = null;
+    this.progressMode = null;
+    this.lastProgressEmitAt = 0;
     this.activeChunks = [];
     this.activeChunkIndex = 0;
     this.activeCallbacks = undefined;

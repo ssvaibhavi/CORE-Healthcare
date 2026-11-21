@@ -138,7 +138,7 @@ async function startServer() {
       const result = await runTtsAi(req.body ?? {});
       res.json({ ok: true, data: result });
     } catch (err) {
-      const mapped = mapGeminiError(err);
+      const mapped = mapGeminiError(err, { operation: 'tts' });
       res.status(mapped.status).json({ error: mapped.code, message: mapped.message });
     }
   });

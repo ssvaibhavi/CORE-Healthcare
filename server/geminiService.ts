@@ -309,7 +309,7 @@ async function callWithExponentialBackoff<T>(
     }
   }
 
-  const mapped = mapGeminiError(lastError, { log: false, modelName });
+  const mapped = mapGeminiError(lastError, { log: false, modelName, operation });
   lastAiDiagnostic = {
     timestamp: new Date().toISOString(),
     operation,
@@ -323,9 +323,10 @@ async function callWithExponentialBackoff<T>(
 
 export function mapGeminiError(
   err: unknown,
-  options: { log?: boolean; modelName?: string } = { log: true }
+  options: { log?: boolean; modelName?: string; operation?: string } = { log: true }
 ): AiServiceHttpError {
-  const activeModel = options.modelName || MODEL_ID;
+  const activeModel =
+    options.modelName || (options.operation === 'tts' ? TTS_MODEL_ID : MODEL_ID);
   if (
     typeof err === 'object' &&
     err !== null &&
@@ -369,43 +370,79 @@ export function mapGeminiError(
     }
   }
 
-  if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || lower.includes('api_key_expired')) {
+  if (
+    lower.includes('api_key_invalid') ||
+    lower.includes('api key not valid') ||
+    lower.includes('api_key_expired') ||
+    lower.includes('unauthenticated')
+  ) {
     return {
-      status: 400,
+      status: 401,
       code: 'AI_KEY_INVALID',
-      message: 'The server Gemini API key was rejected or expired. Please check GEMINI_API_KEY in Settings > Secrets.',
+      message:
+        'Authentication failed: the server Gemini API key is invalid or expired. Please check GEMINI_API_KEY in server environment secrets.',
     };
   }
   if (upstreamStatus === 401 || upstreamStatus === 403 || lower.includes('permission_denied')) {
     return {
       status: 403,
       code: 'AI_PERMISSION_DENIED',
-      message: 'Gemini API access was denied. Please check the API key permissions in Settings > Secrets.',
+      message:
+        'Authentication failed: Gemini API access was denied for this credential or project. Please verify GEMINI_API_KEY permissions.',
     };
   }
   if (upstreamStatus === 429 || lower.includes('resource_exhausted')) {
     const isQuotaExhausted = lower.includes('quota') || lower.includes('billing');
     const isLongWait = retryHintSec !== undefined && retryHintSec > 300;
+    if (isQuotaExhausted) {
+      return {
+        status: 429,
+        code: 'AI_QUOTA_EXCEEDED',
+        message: `Google Gemini API quota for this tier is currently exhausted${retryHintLabel ? ` (retry suggested in ${retryHintLabel})` : ''}. ${
+          isLongWait
+            ? 'Please try again later or check your Gemini API plan and billing.'
+            : 'Please wait briefly and tap Retry.'
+        }`,
+      };
+    }
     return {
       status: 429,
-      code: 'AI_QUOTA_EXCEEDED',
-      message: isQuotaExhausted
-        ? `Google Gemini API quota for this tier is currently exhausted${retryHintLabel ? ` (retry suggested in ${retryHintLabel})` : ''}. ${
-            isLongWait
-              ? 'Please try again later or check your Gemini API plan and billing.'
-              : 'Please wait briefly and tap Retry.'
-          }`
-        : `Google Gemini temporary rate limit reached${retryHintLabel ? ` (retry suggested in ${retryHintLabel})` : ''}. Please wait a moment and tap Retry.`,
+      code: 'AI_RATE_LIMITED',
+      message: `Google Gemini temporary rate limit reached${retryHintLabel ? ` (retry suggested in ${retryHintLabel})` : ''}. Please wait a moment and try again.`,
     };
   }
   if (upstreamStatus === 404 || lower.includes('not_found')) {
     return {
       status: 502,
       code: 'AI_MODEL_UNAVAILABLE',
-      message: `The configured Gemini model (${activeModel}) could not be found right now.`,
+      message: `Unsupported or unavailable Gemini model configuration (${activeModel}). Please verify the configured model and API endpoint.`,
     };
   }
   if (upstreamStatus === 400 || lower.includes('invalid_argument')) {
+    const isUnsupportedConfig =
+      lower.includes('unsupported') &&
+      (lower.includes('model') ||
+        lower.includes('modality') ||
+        lower.includes('modalities') ||
+        lower.includes('response_format') ||
+        lower.includes('speech_config') ||
+        lower.includes('language') ||
+        lower.includes('voice'));
+    if (isUnsupportedConfig) {
+      return {
+        status: 400,
+        code: 'AI_MODEL_UNAVAILABLE',
+        message: `Unsupported Gemini configuration for ${activeModel}: the requested audio format, voice, or language setting was rejected.`,
+      };
+    }
+    if (options.operation === 'tts') {
+      return {
+        status: 400,
+        code: 'TTS_INVALID_REQUEST',
+        message:
+          'Audio generation request format was rejected by the speech service. Please verify the text and selected language and try again.',
+      };
+    }
     return {
       status: 400,
       code: 'AI_REQUEST_INVALID',
@@ -416,7 +453,7 @@ export function mapGeminiError(
     return {
       status: 503,
       code: 'AI_SERVICE_BUSY',
-      message: `Google Gemini (${activeModel}) is temporarily overloaded due to high demand. Your request was not lost — please wait ${retryHintSec ? `about ${retryHintSec} seconds` : 'a few seconds'} and tap Retry.`,
+      message: `Google Gemini (${activeModel}) is temporarily unavailable due to high demand. Please wait ${retryHintSec ? `about ${retryHintSec} seconds` : 'a few seconds'} and try again.`,
     };
   }
   if (
@@ -429,7 +466,7 @@ export function mapGeminiError(
     return {
       status: 504,
       code: 'AI_TIMEOUT',
-      message: 'Google Gemini took too long to respond. Your question was not lost — please tap Retry or ask a shorter question.',
+      message: 'Google Gemini took too long to respond. Please tap Retry or try shorter text.',
     };
   }
 
@@ -940,11 +977,52 @@ function getLocaleForLanguage(lang: AiLanguage): 'en-IN' | 'kn-IN' | 'te-IN' {
   return 'en-IN';
 }
 
+export function prepareTtsTranscript(rawText: string, language: AiLanguage): string {
+  let formatted = rawText
+    .replace(/\r\n/g, '\n')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`+/g, '')
+    // Convert bullet/numbered line breaks into clear sentence pauses
+    .replace(/:\s*\n+\s*(?:[-*•]|\d+[.)])\s+/g, ': ')
+    .replace(/\n+\s*(?:[-*•]|\d+[.)])\s+/g, '. ')
+    .replace(/\n+/g, '. ')
+    // Replace technical separators with calm spoken pauses
+    .replace(/\s*\|\s*/g, ', ')
+    .replace(/\s*;\s*/g, ', ')
+    .replace(/\s*\/\s*/g, ', ')
+    // Normalize spacing around punctuation for gentle pauses
+    .replace(/\s+([.,!?।:])/g, '$1')
+    .replace(/([.,!?।:])([^\s.,!?।:\d])/g, '$1 $2')
+    .replace(/[:;,]\s*\./g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!formatted) return '';
+
+  // Ensure a clean terminal pause
+  if (!/[.!?।]$/.test(formatted)) {
+    formatted += '.';
+  }
+
+  // Keep slight patient-friendly pause after commas in regional scripts
+  if (language === 'kn' || language === 'te') {
+    formatted = formatted.replace(/,\s*/g, ', ');
+  }
+
+  return formatted.slice(0, 2400);
+}
+
+const CALM_HEALTHCARE_SPEECH_STYLE =
+  'Speak as a calm, warm, reassuring patient guide in clear, unhurried pronunciation with gentle pauses at commas and sentences.';
+
 export async function runTtsAi(payload: TtsRequestPayload) {
   validateConsent(payload.consentAccepted);
 
-  const text = sanitizeText(payload.text, 2400);
-  if (!text || text.length < 1) {
+  const rawSanitized = sanitizeText(payload.text, 2400);
+  if (!rawSanitized || rawSanitized.length < 1) {
     const err: AiServiceHttpError = {
       status: 400,
       code: 'EMPTY_TEXT',
@@ -955,6 +1033,7 @@ export async function runTtsAi(payload: TtsRequestPayload) {
 
   const language = normalizeLanguage(payload.language);
   const locale = getLocaleForLanguage(language);
+  const text = prepareTtsTranscript(rawSanitized, language) || rawSanitized;
   const rawRate = typeof payload.rate === 'number' ? payload.rate : 0.9;
   const speakingRate = Math.min(1.25, Math.max(0.75, rawRate));
   const caps = getTtsCapabilities();
@@ -1017,52 +1096,85 @@ export async function runTtsAi(payload: TtsRequestPayload) {
     };
   }
 
-  // Reuses the configured GEMINI_API_KEY with Gemini 3.8 Flash Lite TTS (standard API tier, v1beta for speechConfig/speechMetadata)
+  // Gemini 3.8 TTS via Interactions API (single-speaker audio response on v1beta, Kore calm voice + speech_metadata style)
   const ai = getGeminiClient('v1beta');
-  const paceCue =
-    speakingRate <= 0.8
-      ? 'very gentle, unhurried, slow pace'
-      : speakingRate < 0.95
-      ? 'calm, steady, unhurried pace'
-      : 'natural clear pace';
 
-  const response = await callWithExponentialBackoff(
-    'tts',
-    (abortSignal) =>
-      ai.models.generateContent({
-        model: TTS_MODEL_ID,
-        contents: [
+  const createTtsInteraction = async (useStyleAnnotation: boolean) => {
+    const inputPayload = useStyleAnnotation
+      ? [
           {
-            role: 'user',
-            parts: [
+            type: 'text' as const,
+            text,
+            annotations: [
               {
-                text,
-                speechMetadata: {
-                  style: `Warm, patient, articulate healthcare guide speaking strictly in ${languageName(
-                    language
-                  )} (${locale}) at a ${paceCue}. Pronounce every word clearly for elderly patients.`,
-                },
+                type: 'speech_metadata' as const,
+                style: CALM_HEALTHCARE_SPEECH_STYLE,
               },
             ],
           },
-        ],
-        config: {
-          abortSignal,
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
-        },
-      }),
-    TTS_MODEL_ID
-  );
+        ]
+      : text;
 
-  const parts = response.candidates?.[0]?.content?.parts ?? [];
-  const audioPart = parts.find((p) => Boolean(p?.inlineData?.data));
-  const inline = audioPart?.inlineData;
-  if (!inline?.data) {
+    return callWithExponentialBackoff(
+      'tts',
+      (abortSignal) =>
+        ai.interactions.create(
+          {
+            model: TTS_MODEL_ID,
+            input: inputPayload,
+            response_format: { type: 'audio' },
+            generation_config: {
+              speech_config: [
+                {
+                  language: locale,
+                  voice: 'Kore',
+                },
+              ],
+            },
+            store: false,
+          },
+          { signal: abortSignal }
+        ),
+      TTS_MODEL_ID
+    );
+  };
+
+  let interaction;
+  try {
+    interaction = await createTtsInteraction(true);
+  } catch (err) {
+    const status = extractUpstreamStatus(err);
+    const msg = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
+    // If upstream rejects structured annotation format for a specific input/locale, retry once with plain transcript
+    if (status === 400 && (msg.includes('annotation') || msg.includes('speech_metadata') || msg.includes('input'))) {
+      interaction = await createTtsInteraction(false);
+    } else {
+      throw err;
+    }
+  }
+
+  // Unary response returns complete WAV audio (audio/wav, 24kHz mono 16-bit) on output_audio
+  let audioData = interaction.output_audio?.data;
+  let audioMime = interaction.output_audio?.mime_type;
+
+  if (!audioData && Array.isArray(interaction.steps)) {
+    for (let i = interaction.steps.length - 1; i >= 0; i--) {
+      const step = interaction.steps[i];
+      if (step?.type === 'model_output' && Array.isArray(step.content)) {
+        const audioBlock = step.content.find(
+          (c): c is { type: 'audio'; data?: string; mime_type?: string } =>
+            c?.type === 'audio' && typeof (c as { data?: unknown }).data === 'string'
+        );
+        if (audioBlock?.data) {
+          audioData = audioBlock.data;
+          audioMime = audioBlock.mime_type;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!audioData) {
     const err: AiServiceHttpError = {
       status: 502,
       code: 'TTS_EMPTY_AUDIO',
@@ -1072,8 +1184,8 @@ export async function runTtsAi(payload: TtsRequestPayload) {
   }
 
   return {
-    audioBase64: inline.data,
-    mimeType: inline.mimeType || 'audio/wav',
+    audioBase64: audioData,
+    mimeType: audioMime || 'audio/wav',
     language,
     locale,
     provider: 'gemini-tts' as const,

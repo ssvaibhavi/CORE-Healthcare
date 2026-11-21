@@ -17,6 +17,7 @@ import {
   SpeechPlaybackSnapshot,
   SpeechRate,
 } from '../utils/speech';
+import { AudioProgressBar } from './AudioProgressBar';
 import {
   MessageCircleHeart,
   X,
@@ -2636,6 +2637,16 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
                         <span>Stop</span>
                       </button>
                     </div>
+
+                    {(playbackSnap.status === 'speaking' || playbackSnap.status === 'paused') && (
+                      <div className="w-full basis-full">
+                        <AudioProgressBar
+                          snapshot={playbackSnap}
+                          language={playbackSnap.activeLang || chatLanguage}
+                          compact
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 

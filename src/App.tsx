@@ -37,8 +37,14 @@ import {
   PageView,
   ShowcaseProgress
 } from './types';
-import { speechService, SpeechErrorInfo } from './utils/speech';
-import { AlertCircle } from 'lucide-react';
+import {
+  getAudioLanguageBadge,
+  speechService,
+  SpeechErrorInfo,
+  SpeechPlaybackSnapshot,
+} from './utils/speech';
+import { AudioProgressBar } from './components/AudioProgressBar';
+import { AlertCircle, Loader2, Pause, Play, Volume2, VolumeX } from 'lucide-react';
 
 const DEFAULT_COMFORT_SETTINGS: ComfortSettings = {
   textSize: 'normal',
@@ -157,9 +163,13 @@ export default function App() {
   const [sessionActionsCount, setSessionActionsCount] = useState<number>(0);
   const [demoResetSignal, setDemoResetSignal] = useState<number>(0);
   const [globalAudioError, setGlobalAudioError] = useState<SpeechErrorInfo | null>(null);
+  const [globalPlaybackSnap, setGlobalPlaybackSnap] = useState<SpeechPlaybackSnapshot>(() =>
+    speechService.getPlaybackSnapshot()
+  );
 
   useEffect(() => {
     return speechService.subscribe((snap) => {
+      setGlobalPlaybackSnap(snap);
       setGlobalAudioError(snap.lastError);
     });
   }, []);
@@ -649,48 +659,131 @@ export default function App() {
       {/* Offline Status Toast (shows only when browser reports offline) */}
       <OfflineIndicator language={currentLanguage} />
 
-      {/* Global Unavailable-Voice Notice for quick Listen buttons on pages without inline audio banners */}
-      {globalAudioError &&
+      {/* Global Compact Audio Player & Unavailable-Voice Notice for pages without inline audio strips */}
+      {(globalPlaybackSnap.status !== 'idle' || globalAudioError) &&
         !companionOpen &&
         currentPage !== 'appointment' &&
         currentPage !== 'clarity' &&
         currentPage !== 'voicebridge' && (
           <div
-            role="status"
+            role="region"
+            aria-label="Audio playback controls"
             aria-live="polite"
-            className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-md z-40 no-print bg-[#FCF9F5] border border-[#C88F98] rounded-2xl shadow-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-[#493C39] modal-soft-enter"
+            className="fixed bottom-20 left-4 right-4 sm:bottom-5 sm:left-5 sm:right-auto sm:w-[360px] z-40 no-print bg-[#FCF9F5] border border-[#BEA06D]/70 rounded-2xl shadow-lg p-3.5 space-y-2.5 text-xs text-[#493C39] modal-soft-enter"
           >
-            <div className="flex items-start gap-2.5 flex-1 min-w-[200px]">
-              <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
-              <span className="leading-relaxed">{globalAudioError.message}</span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {globalAudioError.code === 'cloud-consent-required' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAiConsentGranted(true);
-                    speechService.setCloudConsentGranted(true);
-                    speechService.clearError();
-                    speechService.replay();
-                  }}
-                  className="px-3 py-1 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white font-semibold cursor-pointer"
-                >
-                  {currentLanguage === 'kn'
-                    ? 'Gemini ಧ್ವನಿ ಸಕ್ರಿಯಗೊಳಿಸಿ'
-                    : currentLanguage === 'te'
-                    ? 'Gemini వాయిస్ ఆన్ చేయండి'
-                    : 'Enable Gemini Voice'}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => speechService.clearError()}
-                className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
-              >
-                {currentLanguage === 'kn' ? 'ಮುಚ್ಚಿ' : currentLanguage === 'te' ? 'మూసివేయండి' : 'Dismiss'}
-              </button>
-            </div>
+            {globalPlaybackSnap.status !== 'idle' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {globalPlaybackSnap.status === 'loading' ? (
+                      <Loader2 className="w-4 h-4 text-[#C88F98] animate-spin shrink-0" />
+                    ) : (
+                      <Volume2 className="w-4 h-4 text-[#4A6347] shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-bold text-[#3C3330] truncate">
+                        {globalPlaybackSnap.status === 'loading'
+                          ? currentLanguage === 'kn'
+                            ? 'ಧ್ವನಿ ಸಿದ್ಧವಾಗುತ್ತಿದೆ...'
+                            : currentLanguage === 'te'
+                            ? 'వాయిస్ సిద్ధమవుతోంది...'
+                            : 'Generating Audio...'
+                          : getAudioLanguageBadge(globalPlaybackSnap.activeLang || currentLanguage)}
+                      </div>
+                      {globalPlaybackSnap.activeEngineLabel && (
+                        <div className="text-[11px] font-medium text-[#8A6D3F] truncate">
+                          {globalPlaybackSnap.activeEngineLabel}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {globalPlaybackSnap.status !== 'loading' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          globalPlaybackSnap.status === 'paused'
+                            ? speechService.resume()
+                            : speechService.pause()
+                        }
+                        aria-label={
+                          globalPlaybackSnap.status === 'paused' ? 'Resume audio' : 'Pause audio'
+                        }
+                        className="compact-chip px-2.5 py-1 rounded-full bg-white border border-[#BEA06D]/45 font-bold text-[#493C39] inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        {globalPlaybackSnap.status === 'paused' ? (
+                          <Play className="w-3 h-3" />
+                        ) : (
+                          <Pause className="w-3 h-3" />
+                        )}
+                        <span>{globalPlaybackSnap.status === 'paused' ? 'Play' : 'Pause'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => speechService.stop()}
+                      aria-label="Stop audio"
+                      className="compact-chip px-2.5 py-1 rounded-full bg-[#C88F98] hover:bg-[#b27882] text-white font-bold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <VolumeX className="w-3 h-3" />
+                      <span>
+                        {currentLanguage === 'kn'
+                          ? 'ನಿಲ್ಲಿಸಿ'
+                          : currentLanguage === 'te'
+                          ? 'ఆపండి'
+                          : 'Stop'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {(globalPlaybackSnap.status === 'speaking' ||
+                  globalPlaybackSnap.status === 'paused') && (
+                  <AudioProgressBar
+                    snapshot={globalPlaybackSnap}
+                    language={globalPlaybackSnap.activeLang || currentLanguage}
+                    compact
+                  />
+                )}
+              </div>
+            )}
+
+            {globalAudioError && (
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pt-0.5">
+                <div className="flex items-start gap-2 flex-1 min-w-[180px]">
+                  <AlertCircle className="w-4 h-4 text-[#C88F98] shrink-0 mt-0.5" />
+                  <span className="leading-relaxed break-words">{globalAudioError.message}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {globalAudioError.code === 'cloud-consent-required' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiConsentGranted(true);
+                        speechService.setCloudConsentGranted(true);
+                        speechService.clearError();
+                        speechService.replay();
+                      }}
+                      className="px-3 py-1 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white font-semibold cursor-pointer"
+                    >
+                      {currentLanguage === 'kn'
+                        ? 'Gemini ಧ್ವನಿ ಸಕ್ರಿಯಗೊಳಿಸಿ'
+                        : currentLanguage === 'te'
+                        ? 'Gemini వాయిస్ ఆన్ చేయండి'
+                        : 'Enable Gemini Voice'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => speechService.clearError()}
+                    className="font-semibold text-[#8A6D3F] underline shrink-0 cursor-pointer"
+                  >
+                    {currentLanguage === 'kn' ? 'ಮುಚ್ಚಿ' : currentLanguage === 'te' ? 'మూసివేయండి' : 'Dismiss'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
