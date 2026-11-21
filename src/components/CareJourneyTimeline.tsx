@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Appointment, Language, PageView } from '../types';
+import React, { useEffect, useState } from 'react';
+import { ActiveDisruptionState, Appointment, Language, PageView } from '../types';
 import { CARE_JOURNEY_STAGES } from '../data/enhancementsData';
+import { RECOVERY_SCENARIOS } from '../data/recoveryData';
 import { speechService } from '../utils/speech';
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -22,6 +24,8 @@ interface CareJourneyTimelineProps {
   completedTasks: Record<string, boolean>;
   onToggleTask: (taskId: string) => void;
   onPageChange?: (page: PageView) => void;
+  activeDisruption?: ActiveDisruptionState;
+  onClearDisruption?: () => void;
 }
 
 export const CareJourneyTimeline: React.FC<CareJourneyTimelineProps> = ({
@@ -30,13 +34,28 @@ export const CareJourneyTimeline: React.FC<CareJourneyTimelineProps> = ({
   completedTasks,
   onToggleTask,
   onPageChange,
+  activeDisruption,
+  onClearDisruption,
 }) => {
   const [expandedStage, setExpandedStage] = useState<'before' | 'during' | 'after'>('before');
+  const [showWhyChanged, setShowWhyChanged] = useState(false);
   const [lastToggled, setLastToggled] = useState<{
     taskId: string;
     label: string;
     completed: boolean;
   } | null>(null);
+
+  const activeScenario =
+    activeDisruption && activeDisruption.scenarioId !== 'none'
+      ? RECOVERY_SCENARIOS.find((s) => s.id === activeDisruption.scenarioId)
+      : undefined;
+
+  useEffect(() => {
+    if (activeScenario) {
+      setExpandedStage(activeScenario.timelineStageHighlight);
+      setShowWhyChanged(true);
+    }
+  }, [activeScenario]);
 
   const totalTasks = CARE_JOURNEY_STAGES.reduce((sum, st) => sum + st.tasks.length, 0);
   const completedCount = CARE_JOURNEY_STAGES.reduce(
@@ -206,10 +225,98 @@ export const CareJourneyTimeline: React.FC<CareJourneyTimelineProps> = ({
         </div>
       )}
 
+      {/* Adaptive Disruption Banner (preserves completed tasks while explaining timeline adjustment) */}
+      {activeScenario && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-[#E6C1C4]/22 border-2 border-[#C88F98] space-y-3 soft-fade-up">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold text-[#9E4958] uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>
+                  {language === 'kn'
+                    ? 'ಪ್ರಸ್ತುತ ಸನ್ನಿವೇಶಕ್ಕೆ ತಕ್ಕಂತೆ ಮಾರ್ಗದರ್ಶಿ ಬದಲಾಗಿದೆ'
+                    : language === 'te'
+                    ? 'ప్రస్తుత పరిస్థితికి అనుగుణంగా ప్రణాళిక మారింది'
+                    : 'Timeline Adapted for Active Fictional Disruption'}
+                </span>
+              </span>
+              <h4 className="font-display text-lg sm:text-xl font-bold text-[#322826]">
+                {activeScenario.title[language]}
+              </h4>
+              <p className="text-xs sm:text-sm text-[#493C39] leading-relaxed">
+                {activeScenario.timelineAdjustmentNote[language]}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowWhyChanged((v) => !v)}
+                className="compact-chip py-1.5 px-3 rounded-full bg-white border border-[#BEA06D]/50 text-xs font-bold text-[#493C39] cursor-pointer"
+              >
+                {showWhyChanged
+                  ? language === 'kn'
+                    ? 'ಹಿಂದಿನ ಯೋಜನೆ ಮರೆಮಾಡಿ'
+                    : language === 'te'
+                    ? 'పాత ప్లాన్ దాచండి'
+                    : 'Hide Plan Comparison'
+                  : language === 'kn'
+                  ? 'ಏಕೆ ಬದಲಾಯಿತು ನೋಡಿ'
+                  : language === 'te'
+                  ? 'ఎందుకు మారిందో చూడండి'
+                  : 'Compare Earlier vs Adapted Step'}
+              </button>
+              {onClearDisruption && (
+                <button
+                  type="button"
+                  onClick={onClearDisruption}
+                  className="compact-chip py-1.5 px-3 rounded-full bg-white border border-[#4A6347]/45 text-xs font-bold text-[#4A6347] inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>{language === 'kn' ? 'ಸಾಮಾನ್ಯ ಸ್ಥಿತಿ' : language === 'te' ? 'సాధారణ స్థితి' : 'Restore Normal'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {showWhyChanged && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-2 border-t border-[#C88F98]/40">
+              {activeScenario.adaptedStepTitles.map((item) => (
+                <div
+                  key={item.step}
+                  className="p-3 rounded-xl bg-white border border-[#BEA06D]/35 space-y-1 text-xs"
+                >
+                  <span className="text-[11px] font-bold text-[#8A6D3F] uppercase">
+                    {language === 'kn' ? `ಮೊದಲು:` : language === 'te' ? `ముందుగా:` : `Planned:`}{' '}
+                    <span className="line-through opacity-75 font-normal">
+                      {item.original[language]}
+                    </span>
+                  </span>
+                  <p className="font-bold text-[#4A6347]">
+                    {language === 'kn' ? `ಈಗ:` : language === 'te' ? `ఇప్పుడు:` : `Adapted:`}{' '}
+                    {item.revised[language]}
+                  </p>
+                  <p className="text-[#493C39]/80">{item.whyChanged[language]}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-[11px] font-semibold text-[#4A6347]">
+            {language === 'kn'
+              ? '✓ ನೀವು ಈಗಾಗಲೇ ಪೂರ್ಣಗೊಳಿಸಿದ ಹಂತಗಳನ್ನು ಸುರಕ್ಷಿತವಾಗಿ ಉಳಿಸಲಾಗಿದೆ.'
+              : language === 'te'
+              ? '✓ మీరు ఇప్పటికే పూర్తి చేసిన దశలు భద్రంగా ఉంచబడ్డాయి.'
+              : '✓ Your previously completed preparation items remain preserved.'}
+          </p>
+        </div>
+      )}
+
       {/* 3-Stage Interactive Timeline */}
       <div className="relative space-y-4">
         {CARE_JOURNEY_STAGES.map((stage, index) => {
           const isOpen = expandedStage === stage.id;
+          const isAdaptedHighlight = activeScenario?.timelineStageHighlight === stage.id;
           const stageDoneCount = stage.tasks.filter((t) => completedTasks[t.id]).length;
           const stageComplete = stageDoneCount === stage.tasks.length;
           const nextPrompt = getNextStagePrompt(stage.id);
@@ -218,7 +325,9 @@ export const CareJourneyTimeline: React.FC<CareJourneyTimelineProps> = ({
             <div
               key={stage.id}
               className={`rounded-2xl border-2 transition-all duration-300 overflow-hidden ${
-                isOpen
+                isAdaptedHighlight
+                  ? 'border-[#C88F98] bg-[#FCF9F5]/80 shadow-sm'
+                  : isOpen
                   ? 'border-[#BEA06D] bg-[#FCF9F5]/60 shadow-sm'
                   : 'border-[#BEA06D]/25 bg-white hover:border-[#BEA06D]/60'
               }`}

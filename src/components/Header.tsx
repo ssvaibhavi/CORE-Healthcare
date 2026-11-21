@@ -58,6 +58,36 @@ export const Header: React.FC<HeaderProps> = ({
 
   const suiteLinks: Array<{ id: PageView; label: string; tag?: string }> = [
     {
+      id: 'recovery',
+      label:
+        currentLanguage === 'kn'
+          ? 'CORE ಸ್ಮಾರ್ಟ್ ರಿಕವರಿ (ಅಡಚಣೆ ಪರಿಹಾರ)'
+          : currentLanguage === 'te'
+          ? 'CORE స్మార్ట్ రికవరీ (అనుకూల సహాయం)'
+          : 'CORE Smart Recovery (Adaptive Care)',
+      tag: 'Phase 9',
+    },
+    {
+      id: 'impact-lab',
+      label:
+        currentLanguage === 'kn'
+          ? 'CORE ಇಂಪ್ಯಾಕ್ಟ್ ಲ್ಯಾಬ್ (ಹೋಲಿಕೆ)'
+          : currentLanguage === 'te'
+          ? 'CORE ఇంపాక్ట్ ల్యాబ్ (పోలిక)'
+          : 'CORE Impact Lab (Comparison)',
+      tag: 'Lab',
+    },
+    {
+      id: 'navigator',
+      label:
+        currentLanguage === 'kn'
+          ? 'CORE ಸ್ಮಾರ್ಟ್ ಆಸ್ಪತ್ರೆ ನ್ಯಾವಿಗೇಟರ್'
+          : currentLanguage === 'te'
+          ? 'CORE స్మార్ట్ హాస్పిటల్ నావిగేటర్'
+          : 'CORE Smart Hospital Navigator',
+      tag: 'Map',
+    },
+    {
       id: 'showcase',
       label:
         currentLanguage === 'kn'

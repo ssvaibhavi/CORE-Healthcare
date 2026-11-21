@@ -1,4 +1,4 @@
-import { ExplanationComplexity, Language, PageView } from '../types';
+import { AppCompanionContextSnapshot, ExplanationComplexity, Language, PageView } from '../types';
 
 export interface CompanionAiResponse {
   reply: string;
@@ -37,6 +37,31 @@ export interface SmartJourneyAiResponse {
   planTitle: string;
   advisoryNote: string;
   tasks: SmartJourneyAiTask[];
+}
+
+export interface ExplainOptionsAiOption {
+  title: string;
+  steps: string;
+  bestWhen?: string;
+}
+
+export interface ExplainOptionsAiResponse {
+  calmSummary: string;
+  options: ExplainOptionsAiOption[];
+  whoToAsk: string;
+  questionsToAsk: string[];
+  safetyReminder: string;
+  language: Language;
+  complexity: ExplanationComplexity;
+}
+
+export interface TeachBackAiResponse {
+  needsGentleClarification: boolean;
+  whatWasClear: string;
+  gentleClarification: string;
+  simplerVersion: string;
+  confirmationNote: string;
+  language: Language;
 }
 
 export class AiClientError extends Error {
@@ -197,10 +222,31 @@ export function askCompanionAi(params: {
   voicePreferred?: boolean;
   currentPage: PageView;
   pageContext?: string;
+  appContext?: AppCompanionContextSnapshot;
   history: Array<{ role: 'user' | 'assistant'; text: string }>;
   consentAccepted: boolean;
 }): Promise<CompanionAiResponse> {
   return postAiEndpoint<CompanionAiResponse>('/api/ai/companion', params);
+}
+
+export function askExplainOptionsAi(params: {
+  situation: string;
+  scenarioContext?: string;
+  language: Language;
+  complexity?: ExplanationComplexity;
+  consentAccepted: boolean;
+}): Promise<ExplainOptionsAiResponse> {
+  return postAiEndpoint<ExplainOptionsAiResponse>('/api/ai/explain-options', params);
+}
+
+export function submitTeachBackAi(params: {
+  userExplanation: string;
+  referenceExplanation: string;
+  stepPrompt?: string;
+  language: Language;
+  consentAccepted: boolean;
+}): Promise<TeachBackAiResponse> {
+  return postAiEndpoint<TeachBackAiResponse>('/api/ai/teach-back', params);
 }
 
 export function translateAiText(params: {

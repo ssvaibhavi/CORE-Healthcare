@@ -305,6 +305,29 @@ select:focus-visible {
   }
 }
 
+/* Gentle SVG route highlight animation (respects reduced motion) */
+@keyframes routeDashFlow {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+.route-path-animated {
+  stroke-dasharray: 10 8;
+  animation: routeDashFlow 2.6s linear infinite;
+}
+
+.reduce-motion .route-path-animated,
+.gentle-motion .route-path-animated {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-path-animated {
+    animation: none !important;
+  }
+}
+
 /* Clean Print / Save as PDF styling for My Visit Passport */
 @media print {
   header,

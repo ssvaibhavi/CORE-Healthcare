@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ActiveDisruptionState,
   Appointment,
   ExplanationComplexity,
   Language,
@@ -39,6 +40,8 @@ interface CareJourneyViewProps {
   aiConsentGranted: boolean;
   onAcceptAiConsent: () => void;
   onPageChange: (page: PageView) => void;
+  activeDisruption?: ActiveDisruptionState;
+  onClearDisruption?: () => void;
 }
 
 const STARTER_NEEDS: Record<Language, string[]> = {
@@ -65,6 +68,8 @@ export const CareJourneyView: React.FC<CareJourneyViewProps> = ({
   aiConsentGranted,
   onAcceptAiConsent,
   onPageChange,
+  activeDisruption,
+  onClearDisruption,
 }) => {
   const [needText, setNeedText] = useState('');
   const [aiPlanTitle, setAiPlanTitle] = useState('');
@@ -433,6 +438,8 @@ export const CareJourneyView: React.FC<CareJourneyViewProps> = ({
           completedTasks={completedTasks}
           onToggleTask={onToggleTask}
           onPageChange={onPageChange}
+          activeDisruption={activeDisruption}
+          onClearDisruption={onClearDisruption}
         />
       </Reveal>
 

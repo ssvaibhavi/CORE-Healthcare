@@ -46,6 +46,7 @@ export default defineConfig(() => {
         },
         workbox: {
           // Only cache static app shell & approved static guidance assets (never /api or dynamic clinical data)
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [

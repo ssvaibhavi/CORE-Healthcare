@@ -23,7 +23,66 @@ export type PageView =
   | 'accessibility-lab'
   | 'insights'
   | 'showcase'
-  | 'stories';
+  | 'stories'
+  | 'navigator'
+  | 'recovery'
+  | 'impact-lab';
+
+export type DisruptionScenarioId =
+  | 'none'
+  | 'dept_changed'
+  | 'lift_unavailable'
+  | 'language_barrier'
+  | 'missing_details'
+  | 'delayed_arrival'
+  | 'corridor_blocked';
+
+export interface ActiveDisruptionState {
+  scenarioId: DisruptionScenarioId;
+  blockedEdgeIds: string[];
+  recommendedDestination?:
+    | 'entrance'
+    | 'reception'
+    | 'registration'
+    | 'waiting'
+    | 'pharmacy'
+    | 'lift'
+    | 'west-stairs'
+    | 'east-stairs'
+    | 'lift-upper'
+    | 'radiology'
+    | 'laboratory'
+    | 'consultation';
+  updatedAt?: string;
+}
+
+export interface SessionUsabilityMetrics {
+  navigationStepsTaken: number;
+  routeRecalculations: number;
+  clarificationRequests: number;
+  teachBackAttempts: number;
+  completedWithoutAssistance: boolean;
+  startedAtMs: number;
+  journeyCompletedMs?: number;
+}
+
+export interface NavigatorPromptRequest {
+  id: number;
+  prompt: string;
+  targetLanguage?: Language;
+}
+
+export interface AppCompanionContextSnapshot {
+  currentPage: PageView;
+  activeScenario: DisruptionScenarioId;
+  scenarioTitle?: string;
+  routeChanged?: boolean;
+  routeSummary?: string;
+  routeChangeReason?: string;
+  noAccessibleRoute?: boolean;
+  accessibleOnly?: boolean;
+  comfortSummary?: string;
+}
 
 export type ExplanationComplexity = 'extra_simple' | 'simple' | 'detailed';
 export type MotionMode = 'full' | 'gentle' | 'none';
@@ -48,6 +107,8 @@ export interface CareCircleSharingSettings {
   shareReminders: boolean;
   shareDirections: boolean;
   handoffMode?: 'session_only' | '24_hours';
+  situationNote?: string;
+  includeActiveDisruption?: boolean;
 }
 
 export interface IntelligenceProfile {

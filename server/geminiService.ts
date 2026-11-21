@@ -498,7 +498,21 @@ const VALID_PAGES = new Set([
   'insights',
   'showcase',
   'stories',
+  'navigator',
+  'recovery',
+  'impact-lab',
 ]);
+
+export interface CompanionAppContextPayload {
+  activeScenario?: unknown;
+  scenarioTitle?: unknown;
+  routeChanged?: unknown;
+  routeSummary?: unknown;
+  routeChangeReason?: unknown;
+  noAccessibleRoute?: unknown;
+  accessibleOnly?: unknown;
+  comfortSummary?: unknown;
+}
 
 export interface CompanionRequestPayload {
   message?: unknown;
@@ -509,6 +523,7 @@ export interface CompanionRequestPayload {
   voicePreferred?: unknown;
   currentPage?: unknown;
   pageContext?: unknown;
+  appContext?: CompanionAppContextPayload;
   history?: unknown;
   consentAccepted?: unknown;
 }
@@ -535,7 +550,36 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
   const guidedMode = payload.guidedMode === true;
   const voicePreferred = payload.voicePreferred === true;
   const currentPage = typeof payload.currentPage === 'string' ? payload.currentPage : 'home';
-  const pageContext = sanitizeText(payload.pageContext, 300);
+  const pageContext = sanitizeText(payload.pageContext, 1050);
+
+  const rawAppCtx =
+    typeof payload.appContext === 'object' && payload.appContext !== null
+      ? payload.appContext
+      : undefined;
+  const appCtxScenario = rawAppCtx ? sanitizeText(rawAppCtx.activeScenario, 60) : '';
+  const appCtxScenarioTitle = rawAppCtx ? sanitizeText(rawAppCtx.scenarioTitle, 140) : '';
+  const appCtxRouteChanged = rawAppCtx?.routeChanged === true;
+  const appCtxNoAccessible = rawAppCtx?.noAccessibleRoute === true;
+  const appCtxAccessibleOnly = rawAppCtx?.accessibleOnly === true;
+  const appCtxRouteSummary = rawAppCtx ? sanitizeText(rawAppCtx.routeSummary, 260) : '';
+  const appCtxRouteReason = rawAppCtx ? sanitizeText(rawAppCtx.routeChangeReason, 300) : '';
+  const appCtxComfort = rawAppCtx ? sanitizeText(rawAppCtx.comfortSummary, 160) : '';
+
+  const structuredContextBlock = rawAppCtx
+    ? [
+        `ActiveScenario=${appCtxScenario || 'none'}${appCtxScenarioTitle ? ` (${appCtxScenarioTitle})` : ''}`,
+        appCtxRouteSummary ? `Route=${appCtxRouteSummary}` : '',
+        appCtxRouteChanged && appCtxRouteReason ? `RouteChangedReason=${appCtxRouteReason}` : '',
+        appCtxNoAccessible
+          ? 'CRITICAL_ACCESS_RULE=No step-free path exists right now; NEVER suggest stairs; tell user to ask Ground Reception for staff lift escort'
+          : appCtxAccessibleOnly
+          ? 'StepFreeOnly=TRUE (never suggest stairs)'
+          : '',
+        appCtxComfort ? `Comfort=${appCtxComfort}` : '',
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    : '';
 
   const rawHistory = Array.isArray(payload.history)
     ? payload.history
@@ -585,7 +629,17 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
     intentDirective,
     guidedMode ? 'The user prefers step-by-step guided instructions.' : '',
     voicePreferred ? 'Use natural, clear phrasing suitable for text-to-speech playback.' : '',
-    `CORE pages you can suggest by ID when relevant: home, appointment (Hear My Appointment), reschedule, reminders, journey (My Care Journey), clarity (Explain It Simply / CORE Clarity AI), carecircle (CareCircle / CORE Connect), passport (My Visit Passport), intelligence (CORE Intelligence), voicebridge, sense (CORE Sense), carecompass, careflow, accessibility-lab, help (Get Help).`,
+    `CORE pages you can suggest by ID when relevant: home, appointment (Hear My Appointment), reschedule, reminders, journey (My Care Journey), clarity (Explain It Simply / CORE Clarity AI), carecircle (CareCircle), passport (My Visit Passport), intelligence, voicebridge, sense, carecompass, careflow, accessibility-lab, help (Get Help), navigator (CORE Smart Hospital Navigator), recovery (CORE Smart Recovery), impact-lab (CORE Impact Lab).`,
+    currentPage === 'navigator' || currentPage === 'recovery' || pageContext.includes('FICTIONAL_DEMO_MAP') || Boolean(structuredContextBlock)
+      ? [
+          `SMART HOSPITAL NAVIGATOR & RECOVERY GROUNDING RULES (CRITICAL):`,
+          `- You are assisting inside the CORE Smart Hospital Navigator / Adaptive Recovery fictional demonstration.`,
+          `- Use ONLY the approved fictional demonstration hospital locations (Main Entrance, Reception, Registration Counter, Waiting Area, Radiology, Pharmacy, Laboratory, Consultation Rooms, Accessible Lift) and the exact active scenario / route details provided in [Context].`,
+          `- If the user asks why their route changed or what to do during a disruption, answer directly using the active RouteChangedReason and scenario context provided.`,
+          `- If StepFreeOnly=TRUE or CRITICAL_ACCESS_RULE appears, NEVER suggest stairs under any circumstance.`,
+          `- NEVER invent unverified room numbers, wings, exits, floors, parking lots, or pretend to know live hospital wait times or doctor schedules.`,
+        ].join('\n')
+      : '',
     `STRICT PRIVACY & SAFETY RULES:`,
     `1. You are an AI navigation & clarity assistant — NEVER claim to be a doctor, nurse, or clinician.`,
     `2. NEVER diagnose medical conditions, prescribe or alter medication dosages, or interpret test results as medical conclusions.`,
@@ -602,7 +656,9 @@ export async function runCompanionAi(payload: CompanionRequestPayload) {
   }));
 
   const currentTurnText = [
-    `[Context: Current CORE page "${currentPage}"${pageContext ? ` — ${pageContext}` : ''}]`,
+    `[Context: Current CORE page "${currentPage}"${pageContext ? ` — ${pageContext}` : ''}${
+      structuredContextBlock ? ` | ${structuredContextBlock}` : ''
+    }]`,
     `[Required output language: ${languageName(language)} | Length mode: ${complexity}]`,
     userMessage,
   ].join('\n');
@@ -1192,4 +1248,206 @@ export async function runTtsAi(payload: TtsRequestPayload) {
     model: TTS_MODEL_ID,
   };
 }
+
+export interface ExplainOptionsRequestPayload {
+  situation?: unknown;
+  scenarioContext?: unknown;
+  language?: unknown;
+  complexity?: unknown;
+  consentAccepted?: unknown;
+}
+
+export async function runExplainOptionsAi(payload: ExplainOptionsRequestPayload) {
+  validateConsent(payload.consentAccepted);
+
+  const situation = sanitizeText(payload.situation, 1000);
+  if (!situation || situation.length < 4) {
+    const err: AiServiceHttpError = {
+      status: 400,
+      code: 'EMPTY_SITUATION',
+      message: 'Please describe the hospital situation or select a scenario so CORE can explain your options.',
+    };
+    throw err;
+  }
+
+  const language = normalizeLanguage(payload.language);
+  const complexity = normalizeComplexity(payload.complexity);
+  const scenarioContext = sanitizeText(payload.scenarioContext, 800);
+
+  const depthInstruction =
+    complexity === 'extra_simple'
+      ? 'DEPTH: QUICK ANSWER — Keep summary to 1–2 short calming sentences and each option headline under 12 words.'
+      : complexity === 'detailed'
+      ? 'DEPTH: DETAILED GUIDANCE — Provide thorough calm administrative context, clear trade-offs per option, who to talk to, and practical follow-up checks.'
+      : 'DEPTH: SIMPLE STEP-BY-STEP — Provide 1 warm reassuring sentence plus 3–4 short practical options in easy everyday phrasing.';
+
+  const systemInstruction = [
+    `You are CORE Explain My Options, a calm non-clinical hospital administrative guidance assistant.`,
+    `STRICT LANGUAGE REQUIREMENT: Write ALL JSON fields strictly in ${languageName(language)}.`,
+    languageScriptRequirement(language),
+    depthInstruction,
+    `SAFETY & GROUNDING RULES:`,
+    `1. Only give practical hospital administrative options (checking at Reception/Registration, using staff service lift if step-free lift is down, verifying token validity, asking a nurse/coordinator, requesting same-day buffer/reschedule).`,
+    `2. NEVER diagnose, prescribe, alter medication/fasting orders, invent hospital schedules, or claim guaranteed slot availability.`,
+    `3. If Step-Free / Lift Unavailable context is noted, NEVER recommend climbing stairs.`,
+    `4. Frame everything clearly as helpful demonstration guidance to verify with hospital staff.`,
+  ].join('\n');
+
+  const promptText = [
+    scenarioContext ? `[Active Fictional Demonstration Context: ${scenarioContext}]` : '',
+    `Patient/Caregiver question or unexpected situation:\n"${situation}"`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const ai = getGeminiClient();
+  const response = await callWithExponentialBackoff('explain-options', (abortSignal) =>
+    ai.models.generateContent({
+      model: MODEL_ID,
+      contents: promptText,
+      config: {
+        abortSignal,
+        systemInstruction,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            calmSummary: { type: Type.STRING },
+            options: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  steps: { type: Type.STRING },
+                  bestWhen: { type: Type.STRING },
+                },
+                required: ['title', 'steps'],
+              },
+            },
+            whoToAsk: { type: Type.STRING },
+            questionsToAsk: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+            safetyReminder: { type: Type.STRING },
+          },
+          required: ['calmSummary', 'options', 'whoToAsk', 'questionsToAsk', 'safetyReminder'],
+        },
+      },
+    })
+  );
+
+  const parsed = safeJsonParse(response.text);
+  const rawOptions = Array.isArray(parsed.options) ? parsed.options : [];
+
+  return {
+    calmSummary: String(parsed.calmSummary ?? ''),
+    options: rawOptions.slice(0, 4).map((opt: Record<string, unknown>) => ({
+      title: String(opt?.title ?? ''),
+      steps: String(opt?.steps ?? ''),
+      bestWhen: opt?.bestWhen ? String(opt.bestWhen) : undefined,
+    })),
+    whoToAsk: String(parsed.whoToAsk ?? ''),
+    questionsToAsk: Array.isArray(parsed.questionsToAsk)
+      ? parsed.questionsToAsk.map(String).slice(0, 4)
+      : [],
+    safetyReminder: String(parsed.safetyReminder ?? ''),
+    language,
+    complexity,
+  };
+}
+
+export interface TeachBackRequestPayload {
+  userExplanation?: unknown;
+  referenceExplanation?: unknown;
+  stepPrompt?: unknown;
+  language?: unknown;
+  consentAccepted?: unknown;
+}
+
+export async function runTeachBackAi(payload: TeachBackRequestPayload) {
+  validateConsent(payload.consentAccepted);
+
+  const userExplanation = sanitizeText(payload.userExplanation, 900);
+  const referenceExplanation = sanitizeText(payload.referenceExplanation, 900);
+  const stepPrompt = sanitizeText(payload.stepPrompt, 500);
+
+  if (!userExplanation || userExplanation.length < 3) {
+    const err: AiServiceHttpError = {
+      status: 400,
+      code: 'EMPTY_TEACHBACK',
+      message: 'Please type or speak your short explanation first so CORE can review it calmly with you.',
+    };
+    throw err;
+  }
+
+  if (!referenceExplanation) {
+    const err: AiServiceHttpError = {
+      status: 400,
+      code: 'MISSING_REFERENCE',
+      message: 'Missing reference guidance for Teach-Back comparison.',
+    };
+    throw err;
+  }
+
+  const language = normalizeLanguage(payload.language);
+
+  const systemInstruction = [
+    `You are CORE Teach-Back Guide, a deeply kind, respectful healthcare clarity helper.`,
+    `STRICT LANGUAGE REQUIREMENT: Write ALL JSON fields strictly in ${languageName(language)}.`,
+    languageScriptRequirement(language),
+    `CRITICAL NON-JUDGMENTAL RULES:`,
+    `1. Compare the patient's own-words explanation warmly against the Reference Practical Step.`,
+    `2. NEVER assign numeric scores, grades, IQ/intelligence labels, medical competence percentages, or clinical risk classifications.`,
+    `3. NEVER scold or say "you failed" or "wrong"—if an important practical detail was missed or slightly mixed up, praise what they noticed, gently clarify the missed detail in simpler words, and reassure them that asking staff twice is always welcome.`,
+    `4. Set needsGentleClarification=true ONLY if a key safety or routing step (such as avoiding stairs in step-free mode, or checking in at Reception) is missing or contradicted; otherwise false.`,
+    `5. Remind in confirmationNote that this reflection is just for personal clarity and never replaces staff confirmation.`,
+  ].join('\n');
+
+  const promptText = [
+    stepPrompt ? `Question asked: ${stepPrompt}` : '',
+    `Approved Reference Practical Step: ${referenceExplanation}`,
+    `Patient/Caregiver's own-words summary: "${userExplanation}"`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const ai = getGeminiClient();
+  const response = await callWithExponentialBackoff('teach-back', (abortSignal) =>
+    ai.models.generateContent({
+      model: MODEL_ID,
+      contents: promptText,
+      config: {
+        abortSignal,
+        systemInstruction,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            needsGentleClarification: { type: Type.BOOLEAN },
+            whatWasClear: { type: Type.STRING },
+            gentleClarification: { type: Type.STRING },
+            simplerVersion: { type: Type.STRING },
+            confirmationNote: { type: Type.STRING },
+          },
+          required: ['needsGentleClarification', 'whatWasClear', 'simplerVersion', 'confirmationNote'],
+        },
+      },
+    })
+  );
+
+  const parsed = safeJsonParse(response.text);
+  return {
+    needsGentleClarification: Boolean(parsed.needsGentleClarification),
+    whatWasClear: String(parsed.whatWasClear ?? ''),
+    gentleClarification: parsed.gentleClarification ? String(parsed.gentleClarification) : '',
+    simplerVersion: String(parsed.simplerVersion ?? ''),
+    confirmationNote: String(parsed.confirmationNote ?? ''),
+    language,
+  };
+}
+
 

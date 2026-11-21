@@ -25,16 +25,24 @@ import { AccessibilityLabView } from './views/AccessibilityLabView';
 import { InsightsView } from './views/InsightsView';
 import { ShowcaseView } from './views/ShowcaseView';
 import { CareStoriesView } from './views/CareStoriesView';
+import { NavigatorView } from './views/NavigatorView';
+import { SmartRecoveryView } from './views/SmartRecoveryView';
+import { ImpactLabView } from './views/ImpactLabView';
 import { SmartSearchModal } from './components/SmartSearchModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { INITIAL_APPOINTMENTS } from './data/mockAppointments';
+import { RECOVERY_SCENARIOS } from './data/recoveryData';
 import {
+  ActiveDisruptionState,
+  AppCompanionContextSnapshot,
   Appointment,
   CareCircleSharingSettings,
   ComfortSettings,
   IntelligenceProfile,
   Language,
+  NavigatorPromptRequest,
   PageView,
+  SessionUsabilityMetrics,
   ShowcaseProgress
 } from './types';
 import {
@@ -162,6 +170,21 @@ export default function App() {
   );
   const [sessionActionsCount, setSessionActionsCount] = useState<number>(0);
   const [demoResetSignal, setDemoResetSignal] = useState<number>(0);
+  const [navigatorContextSummary, setNavigatorContextSummary] = useState<string>('');
+  const [companionPromptRequest, setCompanionPromptRequest] =
+    useState<NavigatorPromptRequest | null>(null);
+  const [activeDisruption, setActiveDisruption] = useState<ActiveDisruptionState>({
+    scenarioId: 'none',
+    blockedEdgeIds: [],
+  });
+  const [sessionMetrics, setSessionMetrics] = useState<SessionUsabilityMetrics>(() => ({
+    navigationStepsTaken: 1,
+    routeRecalculations: 0,
+    clarificationRequests: 0,
+    teachBackAttempts: 0,
+    completedWithoutAssistance: false,
+    startedAtMs: Date.now(),
+  }));
   const [globalAudioError, setGlobalAudioError] = useState<SpeechErrorInfo | null>(null);
   const [globalPlaybackSnap, setGlobalPlaybackSnap] = useState<SpeechPlaybackSnapshot>(() =>
     speechService.getPlaybackSnapshot()
@@ -232,6 +255,10 @@ export default function App() {
   const handlePageChange = (page: PageView) => {
     setCurrentPage(page);
     setSessionActionsCount((c) => c + 1);
+    setSessionMetrics((prev) => ({
+      ...prev,
+      navigationStepsTaken: prev.navigationStepsTaken + 1,
+    }));
     if (page === 'passport') {
       setShowcaseProgress((prev) => ({ ...prev, visitPassport: true }));
     }
@@ -287,6 +314,15 @@ export default function App() {
     setShowcaseProgress(DEFAULT_SHOWCASE_PROGRESS);
     setAiConsentGranted(false);
     setSessionActionsCount(0);
+    setActiveDisruption({ scenarioId: 'none', blockedEdgeIds: [] });
+    setSessionMetrics({
+      navigationStepsTaken: 1,
+      routeRecalculations: 0,
+      clarificationRequests: 0,
+      teachBackAttempts: 0,
+      completedWithoutAssistance: false,
+      startedAtMs: Date.now(),
+    });
     setComfortOpen(false);
     setSearchOpen(false);
     setDemoResetSignal((c) => c + 1);
@@ -450,6 +486,10 @@ export default function App() {
             complexity={comfortSettings.explanationComplexity}
             aiConsentGranted={aiConsentGranted}
             onAcceptAiConsent={() => setAiConsentGranted(true)}
+            activeDisruption={activeDisruption}
+            onClearDisruption={() =>
+              setActiveDisruption({ scenarioId: 'none', blockedEdgeIds: [] })
+            }
           />
         )}
 
@@ -476,6 +516,7 @@ export default function App() {
               setSessionActionsCount((c) => c + 1);
             }}
             completedTasks={completedTasks}
+            activeDisruption={activeDisruption}
             onPageChange={handlePageChange}
           />
         )}
@@ -654,6 +695,100 @@ export default function App() {
             onPageChange={handlePageChange}
           />
         )}
+
+        {currentPage === 'navigator' && (
+          <NavigatorView
+            currentLanguage={currentLanguage}
+            onLanguageChange={handleLanguageChange}
+            appointment={selectedAppointment}
+            allAppointments={appointments}
+            onSelectAppointment={(apt) => setSelectedAppointment(apt)}
+            onPageChange={handlePageChange}
+            onOpenCompanionWithPrompt={(prompt, targetLanguage) => {
+              setCompanionOpen(true);
+              setCompanionPromptRequest({
+                id: Date.now(),
+                prompt,
+                targetLanguage,
+              });
+            }}
+            onNavigatorContextChange={setNavigatorContextSummary}
+            activeDisruption={activeDisruption}
+            onUpdateDisruption={setActiveDisruption}
+            onRouteRecalculated={() =>
+              setSessionMetrics((prev) => ({
+                ...prev,
+                routeRecalculations: prev.routeRecalculations + 1,
+              }))
+            }
+            reduceMotion={effectiveMotionMode === 'none'}
+          />
+        )}
+
+        {currentPage === 'recovery' && (
+          <SmartRecoveryView
+            currentLanguage={currentLanguage}
+            onLanguageChange={handleLanguageChange}
+            activeDisruption={activeDisruption}
+            onUpdateDisruption={setActiveDisruption}
+            onClearDisruption={() =>
+              setActiveDisruption({ scenarioId: 'none', blockedEdgeIds: [] })
+            }
+            onPageChange={handlePageChange}
+            onOpenCompanionWithPrompt={(prompt, targetLanguage) => {
+              setCompanionOpen(true);
+              setCompanionPromptRequest({
+                id: Date.now(),
+                prompt,
+                targetLanguage,
+              });
+            }}
+            onRouteRecalculated={() =>
+              setSessionMetrics((prev) => ({
+                ...prev,
+                routeRecalculations: prev.routeRecalculations + 1,
+              }))
+            }
+            onTeachBackAttempt={() =>
+              setSessionMetrics((prev) => ({
+                ...prev,
+                teachBackAttempts: prev.teachBackAttempts + 1,
+              }))
+            }
+            onClarificationRequested={() =>
+              setSessionMetrics((prev) => ({
+                ...prev,
+                clarificationRequests: prev.clarificationRequests + 1,
+              }))
+            }
+            onMarkJourneyCompleted={() =>
+              setSessionMetrics((prev) => ({
+                ...prev,
+                journeyCompletedMs: Date.now(),
+              }))
+            }
+            aiConsentGranted={aiConsentGranted}
+            onAcceptAiConsent={() => setAiConsentGranted(true)}
+            initialComplexity={comfortSettings.explanationComplexity}
+            reduceMotion={effectiveMotionMode === 'none'}
+          />
+        )}
+
+        {currentPage === 'impact-lab' && (
+          <ImpactLabView
+            currentLanguage={currentLanguage}
+            sessionMetrics={sessionMetrics}
+            completedTasks={completedTasks}
+            activeDisruption={activeDisruption}
+            onToggleUnassistedCompletion={() =>
+              setSessionMetrics((prev) => ({
+                ...prev,
+                completedWithoutAssistance: !prev.completedWithoutAssistance,
+              }))
+            }
+            onPageChange={handlePageChange}
+          />
+        )}
       </main>
 
       {/* Offline Status Toast (shows only when browser reports offline) */}
@@ -817,6 +952,37 @@ export default function App() {
         resetSignal={demoResetSignal}
         aiConsentGranted={aiConsentGranted}
         onAcceptAiConsent={() => setAiConsentGranted(true)}
+        navigatorPageContextSummary={navigatorContextSummary}
+        appContextSnapshot={(() => {
+          const activeSc =
+            activeDisruption.scenarioId !== 'none'
+              ? RECOVERY_SCENARIOS.find((s) => s.id === activeDisruption.scenarioId)
+              : undefined;
+          const snap: AppCompanionContextSnapshot = {
+            currentPage,
+            activeScenario: activeDisruption.scenarioId,
+            scenarioTitle: activeSc?.title.en,
+            routeChanged:
+              activeDisruption.scenarioId === 'corridor_blocked' ||
+              activeDisruption.scenarioId === 'dept_changed' ||
+              activeDisruption.scenarioId === 'lift_unavailable',
+            routeSummary: navigatorContextSummary || undefined,
+            routeChangeReason: activeSc?.timelineAdjustmentNote.en,
+            noAccessibleRoute: activeDisruption.scenarioId === 'lift_unavailable',
+            accessibleOnly: true,
+            comfortSummary: `textSize=${comfortSettings.textSize}, complexity=${
+              comfortSettings.explanationComplexity || 'simple'
+            }, motion=${effectiveMotionMode}`,
+          };
+          return snap;
+        })()}
+        externalPromptRequest={companionPromptRequest}
+        onClarificationRequested={() =>
+          setSessionMetrics((prev) => ({
+            ...prev,
+            clarificationRequests: prev.clarificationRequests + 1,
+          }))
+        }
       />
 
       {/* Footer */}

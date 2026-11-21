@@ -2,7 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { CoreMonogramMark } from './BotanicalMotifs';
 import { AiConsentNotice } from './AiConsentNotice';
 import { AiTrustHeader, AiTrustFooter, AiSkeletonLoader } from './AiTrustLayer';
-import { ComfortSettings, ExplanationComplexity, Language, PageView } from '../types';
+import {
+  AppCompanionContextSnapshot,
+  ComfortSettings,
+  ExplanationComplexity,
+  Language,
+  NavigatorPromptRequest,
+  PageView,
+} from '../types';
 import { askCompanionAi, formatAiErrorMessage, translateAiText } from '../utils/aiClient';
 import {
   detectInputLanguage,
@@ -683,6 +690,84 @@ const PAGE_CONTEXT_CONFIG: Record<PageView, PageContextEntry> = {
       },
     ],
   },
+  navigator: {
+    title: {
+      en: 'CORE Smart Navigator',
+      kn: 'CORE ಸ್ಮಾರ್ಟ್ ನ್ಯಾವಿಗೇಟರ್',
+      te: 'CORE స్మార్ట్ నావిగేటర్',
+    },
+    contextSummary:
+      'User is using the CORE Smart Hospital Navigator (fictional demonstration floor map with Reception, Registration Counter, Waiting Area, Radiology, Pharmacy, Laboratory, Consultation Rooms, and step-free Accessible Lift).',
+    prompts: [
+      {
+        en: 'Where should I go after entering the hospital?',
+        kn: 'ಆಸ್ಪತ್ರೆಗೆ ಪ್ರವೇಶಿಸಿದ ನಂತರ ನಾನು ಎಲ್ಲಿಗೆ ಹೋಗಬೇಕು?',
+        te: 'ఆసుపత్రిలోకి ప్రవేశించిన తర్వాత నేను ఎక్కడికి వెళ్ళాలి?',
+      },
+      {
+        en: 'How do I find the radiology department?',
+        kn: 'ರೇಡಿಯಾಲಜಿ ವಿಭಾಗವನ್ನು ನಾನು ಹೇಗೆ ಹುಡುಕುವುದು?',
+        te: 'రేడియాలజీ విభాగాన్ని నేను ఎలా కనుగొనాలి?',
+      },
+      {
+        en: 'What happens at registration?',
+        kn: 'ನೋಂದಣಿ ಕೌಂಟರ್‌ನಲ್ಲಿ ಏನಾಗುತ್ತದೆ?',
+        te: 'రిజిస్ట్రేషన్ కౌంటర్ వద్ద ఏమి జరుగుతుంది?',
+      },
+      {
+        en: 'What should I do if I cannot find my appointment details?',
+        kn: 'ನನ್ನ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ವಿವರಗಳು ಸಿಗದಿದ್ದರೆ ಏನು ಮಾಡಬೇಕು?',
+        te: 'నా అపాయింట్‌మెంట్ వివరాలు కనిపించకపోతే ఏమి చేయాలి?',
+      },
+      {
+        en: 'Can you explain these instructions in Kannada?',
+        kn: 'ಈ ಮಾರ್ಗದರ್ಶನ ಸೂಚನೆಗಳನ್ನು ಕನ್ನಡದಲ್ಲಿ ಸರಳವಾಗಿ ವಿವರಿಸುವಿರಾ?',
+        te: 'ఈ సూచనలను కన్నడలో లేదా సులభంగా వివరించగలరా?',
+      },
+    ],
+  },
+  recovery: {
+    title: {
+      en: 'CORE Smart Recovery',
+      kn: 'CORE ಸ್ಮಾರ್ಟ್ ರಿಕವರಿ',
+      te: 'CORE స్మార్ట్ రికవరీ',
+    },
+    contextSummary:
+      'User is inside CORE Smart Recovery exploring fictional hospital disruption scenarios (department shift, lift unavailable, corridor closure, language barrier, missing details, delayed arrival), Explain My Options, and Teach-Back.',
+    prompts: [
+      {
+        en: 'Why did my route change?',
+        kn: 'ನನ್ನ ಆಸ್ಪತ್ರೆ ದಾರಿ ಏಕೆ ಬದಲಾಗಿದೆ?',
+        te: 'నా ఆసుపత్రి దారి ఎందుకు మారింది?',
+      },
+      {
+        en: 'What should I do if the Accessible Lift is unavailable?',
+        kn: 'ಸುಲಭ ಲಿಫ್ಟ್ ಬಂದ್ ಆಗಿದ್ದರೆ ನಾನು ಏನು ಮಾಡಬೇಕು?',
+        te: 'యాక్సెసిబుల్ లిఫ్ట్ పనిచేయకపోతే నేను ఏమి చేయాలి?',
+      },
+      {
+        en: 'Who should I talk to at Reception if I arrive late?',
+        kn: 'ನಾನು ತಡವಾಗಿ ತಲುಪಿದರೆ ಸ್ವಾಗತ ಕೇಂದ್ರದಲ್ಲಿ ಯಾರನ್ನು ಕೇಳಬೇಕು?',
+        te: 'నేను ఆలస్యంగా వెళితే రిసెప్షన్‌లో ఎవరిని అడగాలి?',
+      },
+    ],
+  },
+  'impact-lab': {
+    title: {
+      en: 'CORE Impact Lab',
+      kn: 'CORE ಇಂಪ್ಯಾಕ್ಟ್ ಲ್ಯಾಬ್',
+      te: 'CORE ఇంపాక్ట్ ల్యాబ్',
+    },
+    contextSummary:
+      'User is exploring CORE Impact Lab comparing standard unassisted hospital workflows against guided CORE adaptive journeys using transparent live session usability counters.',
+    prompts: [
+      {
+        en: 'How does CORE calculate the live session usability counters here?',
+        kn: 'ಇಲ್ಲಿ ತೋರಿಸಿರುವ ಲೈವ್ ಸೆಷನ್ ಅಂಕಿಅಂಶಗಳನ್ನು CORE ಹೇಗೆ ಲೆಕ್ಕಹಾಕುತ್ತದೆ?',
+        te: 'ఇక్కడ ఉన్న సెషన్ గణాంకాలను CORE ఎలా లెక్కిస్తుంది?',
+      },
+    ],
+  },
 };
 
 function renderInlineFormatting(text: string): React.ReactNode[] {
@@ -807,6 +892,10 @@ interface CoreCompanionProps {
   onAcceptAiConsent: () => void;
   reduceMotion?: boolean;
   resetSignal?: number;
+  navigatorPageContextSummary?: string;
+  appContextSnapshot?: AppCompanionContextSnapshot;
+  externalPromptRequest?: NavigatorPromptRequest | null;
+  onClarificationRequested?: () => void;
 }
 
 export const CoreCompanion: React.FC<CoreCompanionProps> = ({
@@ -823,6 +912,10 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
   onAcceptAiConsent,
   reduceMotion = false,
   resetSignal = 0,
+  navigatorPageContextSummary,
+  appContextSnapshot,
+  externalPromptRequest = null,
+  onClarificationRequested,
 }) => {
   const getGreeting = (lang: Language): string => {
     if (lang === 'kn') {
@@ -908,6 +1001,28 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
       return prev;
     });
   }, [language, resetSignal]);
+
+  const handledExternalPromptIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!externalPromptRequest) return;
+    if (handledExternalPromptIdRef.current === externalPromptRequest.id) return;
+    handledExternalPromptIdRef.current = externalPromptRequest.id;
+
+    setMode('chat');
+    setIsMinimized(false);
+    if (externalPromptRequest.targetLanguage) {
+      setChatLanguage(externalPromptRequest.targetLanguage);
+    }
+
+    if (aiConsentGranted) {
+      void sendMessageToGemini(externalPromptRequest.prompt, {
+        overrideLanguage: externalPromptRequest.targetLanguage || chatLanguage,
+      });
+    } else {
+      setInputText(externalPromptRequest.prompt);
+      setSafetyInfoOpen(true);
+    }
+  }, [externalPromptRequest, aiConsentGranted]);
 
   useEffect(() => {
     if (resetSignal > 0) {
@@ -1208,6 +1323,13 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
         .slice(-10)
         .map((m) => ({ role: m.sender, text: m.text }));
 
+      const resolvedPageContext =
+        (currentPage === 'navigator' || currentPage === 'recovery') && navigatorPageContextSummary
+          ? navigatorPageContextSummary
+          : activePageCtx.contextSummary;
+
+      onClarificationRequested?.();
+
       const aiData = await askCompanionAi({
         message: cleaned,
         language: targetLang,
@@ -1216,7 +1338,8 @@ export const CoreCompanion: React.FC<CoreCompanionProps> = ({
         guidedMode: comfortSettings.guidedMode,
         voicePreferred: comfortSettings.readAloud,
         currentPage,
-        pageContext: activePageCtx.contextSummary,
+        pageContext: resolvedPageContext,
+        appContext: appContextSnapshot,
         history: historyForApi,
         consentAccepted: true,
       });

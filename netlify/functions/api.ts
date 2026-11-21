@@ -4,7 +4,9 @@ import {
   mapGeminiError,
   runClarityAi,
   runCompanionAi,
+  runExplainOptionsAi,
   runSmartJourneyAi,
+  runTeachBackAi,
   runTranslateAi,
   runTtsAi,
 } from '../../server/geminiService.ts';
@@ -77,6 +79,14 @@ export default async function handler(req: Request): Promise<Response> {
     }
     if (pathname === '/ai/translate') {
       const data = await runTranslateAi(body);
+      return jsonResponse({ ok: true, data });
+    }
+    if (pathname === '/ai/explain-options') {
+      const data = await runExplainOptionsAi(body);
+      return jsonResponse({ ok: true, data });
+    }
+    if (pathname === '/ai/teach-back') {
+      const data = await runTeachBackAi(body);
       return jsonResponse({ ok: true, data });
     }
     if (pathname === '/ai/tts') {

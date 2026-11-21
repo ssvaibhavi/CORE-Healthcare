@@ -230,6 +230,35 @@ export const DemoExperienceBar: React.FC<DemoExperienceBarProps> = ({
 
             <button
               type="button"
+              onClick={() => onPageChange('navigator')}
+              className="py-2.5 px-4 rounded-full bg-[#4A6347] hover:bg-[#384d36] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Compass className="w-4 h-4" />
+              <span>
+                {language === 'kn'
+                  ? 'ಸ್ಮಾರ್ಟ್ ನ್ಯಾವಿಗೇಟರ್'
+                  : language === 'te'
+                  ? 'స్మార్ట్ నావిగేటర్'
+                  : 'Smart Navigator'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onPageChange('recovery')}
+              className="py-2.5 px-4 rounded-full bg-[#C88F98] hover:bg-[#b27882] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <span>
+                {language === 'kn'
+                  ? 'ಸ್ಮಾರ್ಟ್ ರಿಕವರಿ'
+                  : language === 'te'
+                  ? 'స్మార్ట్ రికవరీ'
+                  : 'Smart Recovery'}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setExpanded(!expanded)}
               className="py-2.5 px-5 rounded-full bg-[#BEA06D] hover:bg-[#8F7242] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
             >

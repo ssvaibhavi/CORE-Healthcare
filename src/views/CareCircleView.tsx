@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
+  ActiveDisruptionState,
   Appointment,
   CareCircleSharingSettings,
   Language,
   PageView
 } from '../types';
 import { CARE_JOURNEY_STAGES } from '../data/enhancementsData';
+import { CAREGIVER_SITUATION_PRESETS, RECOVERY_SCENARIOS } from '../data/recoveryData';
 import { downloadPlainTextSummary } from '../utils/calendarExport';
 import { Reveal, WordReveal } from '../components/Reveal';
 import {
@@ -24,7 +26,10 @@ import {
   ArrowRight,
   Download,
   Printer,
-  Clock
+  Clock,
+  Copy,
+  Check,
+  MessageSquarePlus
 } from 'lucide-react';
 
 interface CareCircleViewProps {
@@ -33,6 +38,7 @@ interface CareCircleViewProps {
   sharing: CareCircleSharingSettings;
   onUpdateSharing: (next: CareCircleSharingSettings) => void;
   completedTasks: Record<string, boolean>;
+  activeDisruption?: ActiveDisruptionState;
   onPageChange: (page: PageView) => void;
 }
 
@@ -42,10 +48,16 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
   sharing,
   onUpdateSharing,
   completedTasks,
+  activeDisruption,
   onPageChange,
 }) => {
+  const [copiedSummary, setCopiedSummary] = useState(false);
   const caregiverName = appointment.caregiver?.name || 'Ramesh Gowda';
   const caregiverRelation = appointment.caregiver?.relation || 'Son';
+  const activeScenario =
+    activeDisruption && activeDisruption.scenarioId !== 'none'
+      ? RECOVERY_SCENARIOS.find((s) => s.id === activeDisruption.scenarioId)
+      : undefined;
 
   const handleGrantConsent = () => {
     onUpdateSharing({
@@ -109,9 +121,22 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
         }`
       );
     }
+    if (sharing.situationNote?.trim()) {
+      lines.push(`Current Administrative Situation Note: ${sharing.situationNote.trim()}`);
+    }
+    if (sharing.includeActiveDisruption && activeScenario) {
+      lines.push(`Active Hospital Situation: ${activeScenario.title[currentLanguage]} — ${activeScenario.timelineAdjustmentNote[currentLanguage]}`);
+    }
     lines.push('------------------------------------------------------------');
-    lines.push('Note: Demonstration summary only. No sensitive clinical records included and no external server transmission occurred.');
+    lines.push('Note: Demonstration summary only. No sensitive clinical records included, no messages sent, and no public links generated.');
     return lines.join('\n');
+  };
+
+  const handleCopySummary = () => {
+    const txt = buildHandoffText();
+    navigator.clipboard?.writeText(txt).catch(() => {});
+    setCopiedSummary(true);
+    window.setTimeout(() => setCopiedSummary(false), 2500);
   };
 
   return (
@@ -397,6 +422,80 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
               })}
             </div>
           </div>
+
+          {/* Patient-Controlled Current Situation Note Composer */}
+          <div className="pt-4 border-t border-[#BEA06D]/20 space-y-2.5">
+            <label
+              htmlFor="carecircle-situation-note"
+              className="text-xs font-bold text-[#8F7242] uppercase tracking-wider flex items-center gap-1.5"
+            >
+              <MessageSquarePlus className="w-3.5 h-3.5" />
+              <span>
+                {currentLanguage === 'kn'
+                  ? 'ಪ್ರಸ್ತುತ ಆಸ್ಪತ್ರೆ ಸ್ಥಿತಿ ಟಿಪ್ಪಣಿ (ಐಚ್ಛಿಕ)'
+                  : currentLanguage === 'te'
+                  ? 'ప్రస్తుత ఆసుపత్రి పరిస్థితి గమనిక (ఐచ్ఛికం)'
+                  : 'Current Administrative Situation Note (Optional)'}
+              </span>
+            </label>
+
+            <div className="flex flex-wrap gap-1.5">
+              {CAREGIVER_SITUATION_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() =>
+                    onUpdateSharing({
+                      ...sharing,
+                      situationNote: preset.note[currentLanguage],
+                    })
+                  }
+                  className="compact-chip text-[11px] px-2.5 py-1 rounded-full bg-[#FCF9F5] border border-[#BEA06D]/35 hover:border-[#C88F98] text-[#493C39] cursor-pointer"
+                >
+                  {preset.label[currentLanguage]}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              id="carecircle-situation-note"
+              rows={2}
+              maxLength={320}
+              value={sharing.situationNote || ''}
+              onChange={(e) => onUpdateSharing({ ...sharing, situationNote: e.target.value })}
+              placeholder={
+                currentLanguage === 'kn'
+                  ? 'ಉದಾ: ನಾನು ನೋಂದಣಿ ಕೌಂಟರ್ ಹುಡುಕಲು ಸಹಾಯ ಬೇಕಿದೆ...'
+                  : currentLanguage === 'te'
+                  ? 'ఉదా: నాకు రిజిస్ట్రేషన్ కౌంటర్ వద్ద సహాయం కావాలి...'
+                  : 'E.g. Please meet me near Radiology after registration...'
+              }
+              className="w-full p-3 rounded-xl border border-[#BEA06D]/35 bg-[#FCF9F5] text-xs sm:text-sm text-[#3C3330] focus:outline-none focus:ring-2 focus:ring-[#BEA06D]"
+            />
+
+            {activeScenario && (
+              <label className="flex items-center gap-2 text-xs font-semibold text-[#3C3330] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(sharing.includeActiveDisruption)}
+                  onChange={() =>
+                    onUpdateSharing({
+                      ...sharing,
+                      includeActiveDisruption: !sharing.includeActiveDisruption,
+                    })
+                  }
+                  className="w-4 h-4 accent-[#BEA06D]"
+                />
+                <span>
+                  {currentLanguage === 'kn'
+                    ? `ಪ್ರಸ್ತುತ ಬದಲಾವಣೆ ಸೇರಿಸಿ: ${activeScenario.shortLabel[currentLanguage]}`
+                    : currentLanguage === 'te'
+                    ? `ప్రస్తుత మార్పును చేర్చండి: ${activeScenario.shortLabel[currentLanguage]}`
+                    : `Include active change: ${activeScenario.shortLabel[currentLanguage]}`}
+                </span>
+              </label>
+            )}
+          </div>
         </div>
 
         {/* Right: Caregiver Dashboard Prototype Preview */}
@@ -598,6 +697,31 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
                     {buildHandoffText()}
                   </pre>
                   <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCopySummary}
+                      className="compact-chip py-2 px-4 rounded-full bg-white border border-[#BEA06D] hover:bg-[#FCF9F5] text-[#3C3330] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {copiedSummary ? (
+                        <Check className="w-3.5 h-3.5 text-[#4A6347]" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5 text-[#8F7242]" />
+                      )}
+                      <span>
+                        {copiedSummary
+                          ? currentLanguage === 'kn'
+                            ? 'ಕಾಪಿ ಆಗಿದೆ'
+                            : currentLanguage === 'te'
+                            ? 'కాపీ అయింది'
+                            : 'Copied Summary'
+                          : currentLanguage === 'kn'
+                          ? 'ಸಾರಾಂಶ ಕಾಪಿ ಮಾಡಿ'
+                          : currentLanguage === 'te'
+                          ? 'సారాంశం కాపీ చేయండి'
+                          : 'Copy Summary'}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() =>

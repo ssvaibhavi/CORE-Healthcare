@@ -15,6 +15,57 @@ export interface SearchEntry {
 
 export const CORE_SEARCH_ENTRIES: SearchEntry[] = [
   {
+    id: 'smart-recovery',
+    category: 'modules',
+    title: {
+      en: 'CORE Smart Recovery (Adaptive Route & Disruptions)',
+      kn: 'CORE ಸ್ಮಾರ್ಟ್ ರಿಕವರಿ (ದಾರಿ ಬದಲಾವಣೆ ಮತ್ತು ಪರಿಹಾರ)',
+      te: 'CORE స్మార్ట్ రికవరీ (దారి మార్పు & సహాయం)',
+    },
+    description: {
+      en: 'Simulate lift closures, room changes, language barriers, dynamic route replanning, Explain My Options, and Teach-Back.',
+      kn: 'ಲಿಫ್ಟ್ ಬಂದ್, ಕೊಠಡಿ ಬದಲಾವಣೆ, ಬದಲಿ ದಾರಿ ಲೆಕ್ಕ, ಆಯ್ಕೆ ವಿವರಣೆ ಮತ್ತು ಟೀಚ್-ಬ್ಯಾಕ್ ಪರಿಶೀಲನೆ.',
+      te: 'లిఫ్ట్ ఆగిపోవడం, గది మార్పు, ప్రత్యామ్నాయ దారి, ఎంపికల వివరణ మరియు టీచ్-బ్యాక్ పరిశీలన.',
+    },
+    keywords: 'smart recovery disruption lift unavailable room changed route replanning teach back explain options delayed',
+    actionType: 'navigate',
+    targetPage: 'recovery',
+  },
+  {
+    id: 'impact-lab',
+    category: 'modules',
+    title: {
+      en: 'CORE Impact Lab (Live Usability & Workflow Comparison)',
+      kn: 'CORE ಇಂಪ್ಯಾಕ್ಟ್ ಲ್ಯಾಬ್ (ಬಳಕೆ ಸುಲಭತೆಯ ಹೋಲಿಕೆ)',
+      te: 'CORE ఇంపాక్ట్ ల్యాబ్ (వినియోగ పోలిక)',
+    },
+    description: {
+      en: 'Compare unassisted hospital visits with guided adaptive CORE workflows alongside transparent live session counters.',
+      kn: 'ಮಾರ್ಗದರ್ಶನವಿಲ್ಲದ ಭೇಟಿ ಮತ್ತು CORE ಪಯಣದ ನಡುವಿನ ವ್ಯತ್ಯಾಸ ಹಾಗೂ ಸೆಷನ್ ಅಂಕಿಅಂಶಗಳು.',
+      te: 'సాధారణ సందర్శన మరియు CORE ప్రయాణం మధ్య పోలిక & లైవ్ సెషన్ కౌంటర్లు.',
+    },
+    keywords: 'impact lab metrics comparison usability analytics without core with core evaluation',
+    actionType: 'navigate',
+    targetPage: 'impact-lab',
+  },
+  {
+    id: 'smart-navigator',
+    category: 'modules',
+    title: {
+      en: 'CORE Smart Hospital Navigator (Floor Map & Journey)',
+      kn: 'CORE ಸ್ಮಾರ್ಟ್ ಆಸ್ಪತ್ರೆ ನ್ಯಾವಿಗೇಟರ್ (ಮಹಡಿ ನಕ್ಷೆ)',
+      te: 'CORE స్మార్ట్ హాస్పిటల్ నావిగేటర్ (ఫ్లోర్ మ్యాప్)',
+    },
+    description: {
+      en: '5-stage guided visit journey, interactive floor map, step-free lift routing, Gentle Guidance Mode, and printable Navigation Card.',
+      kn: '5-ಹಂತದ ಆಸ್ಪತ್ರೆ ಪಯಣ, ನಕ್ಷೆ, ಮೆಟ್ಟಿಲು ರಹಿತ ಲಿಫ್ಟ್ ದಾರಿ ಮತ್ತು ಮಾರ್ಗದರ್ಶಿ ಕಾರ್ಡ್.',
+      te: '5-దశల ఆసుపత్రి ప్రయాణం, ఫ్లోర్ మ్యాప్, మెట్లు లేని లిఫ్ట్ మార్గం మరియు నావిగేషన్ కార్డు.',
+    },
+    keywords: 'smart navigator hospital floor map directions radiology pharmacy lab lift accessible route gentle mode navigation card',
+    actionType: 'navigate',
+    targetPage: 'navigator',
+  },
+  {
     id: 'hear-appointment',
     category: 'modules',
     title: {
